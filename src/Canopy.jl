@@ -3,7 +3,8 @@ module Canopy
 using Dictionaries
 using TensorKit
 
-include("graphs.jl")
+include("edges.jl")
+
 include("states.jl")
 include("operators.jl")
 
