@@ -263,3 +263,28 @@ function TensorKit.TensorMap(state::TensorNetworkState)
 
     return ncon(tensors, indices)
 end
+
+# --- pretty printing ---------------------------------------------------------
+function Base.show(io::IO, ::MIME"text/plain", state::TensorNetworkState)
+    summary(io, state)
+    print(io, " with ", length(state), " vertices:")
+    indent = '\t'
+    inner = IOContext(io, :typeinfo => eltype(state))
+    for v in Graphs.vertices(state)
+        println(io)
+        println(io)
+        print(io, " vertex ", v, ":")
+        T = state[v]
+        d = length(neighbors(state, v))
+        for k in numin(T):-1:(d + 1)
+            T = removeunit(T, 1 + k)
+        end
+        buf = IOBuffer()
+        show(IOContext(buf, inner), MIME"text/plain"(), T)
+        for line in eachline(IOBuffer(take!(buf)))
+            println(io)
+            print(io, indent, line)
+        end
+    end
+    return nothing
+end
