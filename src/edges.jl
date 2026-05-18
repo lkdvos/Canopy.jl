@@ -19,6 +19,9 @@ Base.last(e::AbstractEdge) = e.dst
 
 Base.Tuple(e::AbstractEdge) = (e.src, e.dst)
 
+Base.convert(::Type{UndirectedEdge{V}}, x::Tuple{V, V}) where {V} = UndirectedEdge(x...)
+Base.convert(::Type{DirectedEdge{V}}, x::Pair{V, V}) where {V} = DirectedEdge(x...)
+
 Base.reverse(e::DirectedEdge) = DirectedEdge(e.dst, e.src)
 Base.reverse(e::UndirectedEdge) = e
 
