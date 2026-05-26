@@ -1,6 +1,66 @@
+# --- BP message conventions ---------------------------------------------------
+#
+# Belief-propagation messages live on the *directed* version of the state's
+# graph. For every undirected edge `(u, v)` of `state` there are two directed
+# edges and two messages:
+#
+#     DirectedEdge(u, v)   "message from sender u to receiver v"
+#     DirectedEdge(v, u)   "message from sender v to receiver u"
+#
+# ## Geometry
+#
+# A directed edge `e = (s, r)` is read as `sender → receiver`. The message
+# `msgs[e]` lives on the **receiver's** side of the underlying bond, i.e. on
+# the virtual leg of `state[r]` that points to `s`. With
+# `V_r = virtualspace(state, DirectedEdge(r, s))` (the bond space as seen
+# from r), every message has TensorKit space `V_r ← V_r`.
+#
+# ## Codomain / domain
+#
+# Treating a message as a linear map `V_r → V_r`:
+#
+# - the **domain** (ket-layer) leg contracts against the ket virtual leg of
+#   `state[r]` at this bond — this is what [`attach_messages`](@ref) does;
+# - the **codomain** (bra-layer) leg takes the place of that ket virtual
+#   leg in the modified site tensor, so a subsequent contraction with the
+#   bra `state[r]'` closes the BP environment.
+#
+# In the double-layer picture, a message is the partial trace of the
+# environment outside the receiver projected onto the bond: codomain = bra
+# index, domain = ket index. On a tree the BP fixed point coincides with
+# this exact environment; on graphs with loops it is the loop-free
+# (Bethe) approximation.
+#
+# ## Normalization
+#
+# Messages are defined up to overall scale (BP only constrains them up to a
+# multiplicative constant per directed edge). The convention used here is
+# trace normalization: [`compute_message`](@ref) returns the new message
+# normalized by its trace, and [`tr_distance`](@ref) compares two messages
+# after trace-normalising both — i.e. it ignores any overall rescaling.
+#
+# ## Identity initialization
+#
+# `BPMessages(state)` initialises every message to the identity on its
+# receiver-side space. This is the natural starting point for BP and is
+# *exact* on trees: a single sweep along the tree reaches the fixed point.
+
 const MessageTensor{T <: Number, S <: IndexSpace, A <: DenseVector{T}} =
     TensorMap{T, S, 1, 1, A}
 
+"""
+    BPMessages{T, S, A, V}
+
+Container for BP messages over a [`TensorNetworkState`](@ref) with vertex
+keys of type `V`. Each undirected state edge contributes two entries — one
+per direction — stored in a `Dictionary` keyed by `DirectedEdge{V}`.
+
+Every message is a `TensorMap{T, S, 1, 1, A}` of space `V_r ← V_r`, where
+`V_r` is the virtual-leg space of the *receiver* at that bond. See the
+file header for the geometric convention (sender → receiver, codomain =
+bra, domain = ket) used by [`attach_messages`](@ref) and
+[`compute_message`](@ref).
+"""
 struct BPMessages{T <: Number, S <: IndexSpace, A <: DenseVector{T}, V}
     messages::Dictionary{DirectedEdge{V}, MessageTensor{T, S, A}}
 end
@@ -8,8 +68,12 @@ end
 """
     BPMessages(state::TensorNetworkState)
 
-Identity-message initialization: every directed edge carries the identity on the receiver's side of the underlying undirected edge.
-This is the natural BP starting point and the fixed point on a trivial network.
+Allocate a `BPMessages` for `state` with every directed edge initialized to
+the identity on the receiver's side of the underlying undirected edge.
+
+This is the standard BP starting point and is *exact* on trees (one sweep
+reaches the fixed point). See the file header for the message-space
+convention.
 """
 function BPMessages(state::TensorNetworkState)
     K = DirectedEdge{keytype(state)}
@@ -52,10 +116,15 @@ Base.length(msgs::BPMessages) = length(msgs.messages)
 """
     check_consistency(state, messages) -> Bool
 
-Return `true` if `state` is consistent with `messages`:
+Return `true` if `messages` is structurally compatible with `state`:
 
-- every (undirected) edge of the `state` has a pair of `messages`.
-- every message runs along the direction of its arrow
+- every undirected edge of `state` has both directed messages present;
+- each message has space `V_r ← V_r`, where `V_r` is the virtual-leg
+  space of the receiver (`last(edge)`) at that bond — i.e. the messages
+  follow the sender→receiver convention documented at the top of this file.
+
+Does not check that the messages are a BP fixed point; only that their
+spaces line up with `state`.
 """
 function check_consistency(state::TensorNetworkState, msgs::BPMessages)
     edges = Graphs.edges(state)
@@ -79,17 +148,20 @@ end
 """
     attach_messages(state, msgs, site, edges) -> StateTensor
 
-Return a copy of the on-site tensor `state[site]` with the incoming BP
+Return a copy of the on-site tensor `state[site]` with the *incoming* BP
 messages on `edges` absorbed into the corresponding virtual legs. Each
-element of `edges` must be a `DirectedEdge` whose `last` endpoint is `site`;
-the message `msgs[e]` is contracted (domain / ket side) against the
-virtual ket leg of `state[site]` at position `leg_index(state, reverse(e))`,
-leaving the message's codomain (bra side) in its place.
+element of `edges` must be a `DirectedEdge` ending at `site` (i.e.
+`last(e) == site`, so `site` is the receiver and `msgs[e]` lives on this
+side of the bond).
 
-Because every message has space `V ← V`, the result has the same
-`TensorMap` space as `state[site]` and the same type as `eltype(state)`.
-Legs not covered by `edges` — including padded unit-space legs — are passed
-through unchanged.
+For each such edge `e`, the leg `k = leg_index(state, reverse(e))` of
+`state[site]` is replaced as follows: the message's **domain** (ket) is
+contracted against the ket virtual leg of `state[site]` at position `k`,
+and the message's **codomain** (bra) takes its place. Because every
+message has space `V_r ← V_r`, the result has the same `TensorMap` space
+as `state[site]` and the same concrete type as `eltype(state)`. Legs not
+listed in `edges` — including padded unit-space legs — pass through
+unchanged.
 """
 function attach_messages(
         state::TensorNetworkState, msgs::BPMessages, site, edges
@@ -113,8 +185,23 @@ function attach_messages(
     return permute(raw, ((1,), ntuple(i -> i + 1, numin(T))))::eltype(state)
 end
 
-# Compute the new message for a single directed edge WITHOUT mutating msgs.
-# Note that we perform an in-place permutation at the end to restore type stability
+"""
+    compute_message(msgs, state, edge::DirectedEdge) -> MessageTensor
+    compute_message!(out, msgs, state, edge::DirectedEdge) -> out
+
+Compute the updated BP message along `edge = (s, r)` from the current
+`msgs`. The sender's on-site tensor `state[s]` is closed with its bra by
+absorbing every incoming message on `s` *except* the one coming from
+`r` ([`attach_messages`](@ref)), and contracted with `state[s]'`; the
+remaining open virtual legs — codomain = bra side at `r`, domain = ket
+side at `r` — form the new message in space `V_r ← V_r`.
+
+`compute_message` allocates a fresh `MessageTensor`; `compute_message!`
+writes into `out`, which must have the same space as `msgs[edge]`. Neither
+mutates `msgs`, and neither performs trace normalization — callers (e.g.
+[`BeliefPropagation`](@ref)) are expected to normalise the returned
+message.
+"""
 compute_message(msgs::BPMessages, state::TensorNetworkState, edge::DirectedEdge) =
     compute_message!(similar(msgs[edge]), msgs, state, edge)
 
@@ -139,6 +226,24 @@ function compute_message!(msg, msgs::BPMessages, state::TensorNetworkState, edge
     return repartition!(msg, ncon(tensors, indices))::typeof(msg)
 end
 
+"""
+    tr_distance(A, B; p=1, is_hermitian=false) -> Real
+    tr_distance!(A, B; p=1, is_hermitian=false) -> Real
+
+Schatten-`p` distance between two messages after trace normalization,
+
+    ‖ A/tr(A) − B/tr(B) ‖_p .
+
+This is the natural BP convergence diagnostic: BP messages are only
+defined up to an overall scale, so comparing raw messages is meaningless;
+comparing trace-normalised ones is. With `p = 1` (the default) this is
+the trace distance.
+
+Singular values of the difference are used by default; pass
+`is_hermitian = true` to use eigenvalues instead, which is cheaper and
+appropriate when both messages are known to be Hermitian (e.g. positive
+density-matrix-like messages). The bang version may overwrite `A` and `B`.
+"""
 function tr_distance(
         A::MessageTensor, B::MessageTensor;
         p::Real = 1, is_hermitian::Bool = false
