@@ -6,6 +6,7 @@ export TensorNetworkState, BPMessages
 
 using Dictionaries
 using Graphs: Graphs
+using Random: Random
 
 using AlgorithmsInterface: AlgorithmsInterface as AI
 using AlgorithmsInterface: StopAfter

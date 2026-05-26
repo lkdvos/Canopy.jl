@@ -1,20 +1,3 @@
-# --- BPMessages --------------------------------------------------------------
-# Directed-edge dictionary of message tensors, over the same vertex set as a
-# `TensorNetworkState`. Each directed edge `u → v` carries a TensorMap on the
-# receiver `v`'s side of the underlying undirected edge, in the (ket; bra)
-# convention `m[ket; bra]`:
-#
-#   * codomain index = ket-bond index at v's side. It contracts with v's
-#     domain (ket bond) leg via the codom-vs-dom @tensor rule (same literal).
-#   * domain index = bra-bond index at v's side. It contracts with conj(v)'s
-#     domain (bra bond) leg via the dom-vs-dom @tensor rule (dual literal).
-#
-# Data convention: `m[a; b] = sum_p T_u[p; a, ...] * conj(T_u)[p; b, ...] *
-# (incoming messages)` — codomain index drawn from `T_u`'s dom (ket), domain
-# index from `conj(T_u)`'s dom (bra). With the target leg permuted to the
-# last domain position, the BP contraction outputs `M` already in
-# `V_v-side ← V_v-side`, so no `flip` is needed.
-
 const MessageTensor{T <: Number, S <: IndexSpace, A <: DenseVector{T}} =
     TensorMap{T, S, 1, 1, A}
 
@@ -25,20 +8,23 @@ end
 """
     BPMessages(state::TensorNetworkState)
 
-Identity-message initialization: every directed edge carries the identity on
-the receiver's side of the underlying undirected edge. This is the natural BP
-starting point and the fixed point on a trivial network.
+Identity-message initialization: every directed edge carries the identity on the receiver's side of the underlying undirected edge.
+This is the natural BP starting point and the fixed point on a trivial network.
 """
 function BPMessages(state::TensorNetworkState)
     K = DirectedEdge{keytype(state)}
     TT = MessageTensor{scalartype(state), spacetype(state), TensorKit.storagetype(state)}
     messages = Dictionary{K, TT}()
     for edge in Graphs.edges(state)
-        edge_forwards = DirectedEdge(Tuple(edge)...)
-        V_forwards = virtualspace(state, edge_forwards)
-        msg = TensorKit.id!(TT(undef, V_forwards ← V_forwards))
-        insert!(messages, edge_forwards, msg)
-        insert!(messages, reverse(edge_forwards), copy(msg))
+        edge_fwd = DirectedEdge(Tuple(edge)...)
+        V_fwd = virtualspace(state, reverse(edge_fwd))
+        msg_fwd = TensorKit.id!(TT(undef, V_fwd ← V_fwd))
+        insert!(messages, edge_fwd, msg_fwd)
+
+        edge_bwd = reverse(edge_fwd)
+        V_bwd = virtualspace(state, reverse(edge_bwd))
+        msg_bwd = TensorKit.id!(TT(undef, V_bwd ← V_bwd))
+        insert!(messages, edge_bwd, msg_bwd)
     end
     return BPMessages(messages)
 end
@@ -46,6 +32,8 @@ end
 # Properties
 # ----------
 Base.eltype(::Type{BPMessages{T, S, A, V}}) where {T, S, A, V} = TensorMap{T, S, 1, 1, A}
+
+Base.keytype(msgs::BPMessages) = keytype(typeof(msgs))
 Base.keytype(::Type{BPMessages{T, S, A, V}}) where {T, S, A, V} = V
 
 VectorInterface.scalartype(::Type{T}) where {T <: BPMessages} = scalartype(eltype(T))
@@ -71,15 +59,16 @@ Return `true` if `state` is consistent with `messages`:
 """
 function check_consistency(state::TensorNetworkState, msgs::BPMessages)
     edges = Graphs.edges(state)
-    2 * length(edges) == length(messages) || return false
+    2 * length(edges) == length(msgs.messages) || return false
 
     for edge in edges
         edge_fwd = DirectedEdge(Tuple(edge)...)
         (haskey(msgs, edge_fwd) && haskey(msgs, reverse(edge_fwd))) || return false
 
-        V = virtualspace(state, edge)
-        space(msgs[edge_fwd]) == V ← V || return false
-        space(msgs[reverse(edge_fwd)]) == V ← V || return false
+        V_recv_fwd = virtualspace(state, reverse(edge_fwd))
+        V_recv_bwd = virtualspace(state, edge_fwd)
+        space(msgs[edge_fwd])          == (V_recv_fwd ← V_recv_fwd) || return false
+        space(msgs[reverse(edge_fwd)]) == (V_recv_bwd ← V_recv_bwd) || return false
     end
     return true
 end
@@ -93,9 +82,9 @@ end
 Return a copy of the on-site tensor `state[site]` with the incoming BP
 messages on `edges` absorbed into the corresponding virtual legs. Each
 element of `edges` must be a `DirectedEdge` whose `last` endpoint is `site`;
-the message `msgs[e]` is contracted (codomain / ket side) against the
+the message `msgs[e]` is contracted (domain / ket side) against the
 virtual ket leg of `state[site]` at position `leg_index(state, reverse(e))`,
-leaving the message's bra-side index in its place.
+leaving the message's codomain (bra side) in its place.
 
 Because every message has space `V ← V`, the result has the same
 `TensorMap` space as `state[site]` and the same type as `eltype(state)`.
@@ -117,7 +106,7 @@ function attach_messages(
         k = leg_index(state, reverse(e))
         T_idx[k + 1] = (next_label += 1)
         push!(tensors, msgs[e])
-        push!(indices, [T_idx[k + 1], -(k + 1)])
+        push!(indices, [-(k + 1), T_idx[k + 1]])
     end
 
     raw = ncon(tensors, indices)
@@ -141,14 +130,13 @@ function compute_message!(msg, msgs::BPMessages, state::TensorNetworkState, edge
     )
     Tm = attach_messages(state, msgs, site, incoming)
 
-    Tm_idx = replace(1:N, (target + 1) => -1)
-    Td_idx = replace(vcat(2:N, [1]), (target + 1) => -2)
+    Tm_idx = replace(1:N, (target + 1) => -2)
+    Td_idx = replace(vcat(2:N, [1]), (target + 1) => -1)
 
     tensors = Any[Tm, T']
     indices = Vector{Int}[Tm_idx, Td_idx]
-    p = isless(Tuple(edge)...) ? ((1,), (2,)) : ((2,), (1,))
 
-    return permute!(msg, ncon(tensors, indices), p)::typeof(msg)
+    return repartition!(msg, ncon(tensors, indices))::typeof(msg)
 end
 
 function tr_distance(
@@ -196,7 +184,7 @@ end
 
 function AI.step!(problem::BPProblem, ::BeliefPropagation, state::BPState)
     messages = map(keys(state.iterate.messages)) do edge
-        return compute_message(state.iterate, problem.network, edge)
+        return normalize!(compute_message(state.iterate, problem.network, edge))
     end
     state.iterate = BPMessages(messages)
     return state

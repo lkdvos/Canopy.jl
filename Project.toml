@@ -7,10 +7,22 @@ authors = ["lkdvos <ldevos98@gmail.com> and contributors"]
 projects = ["test", "docs"]
 
 [deps]
+AlgorithmsInterface = "d1e3940c-cd12-4505-8585-b0a4b322527d"
 Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
+Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
+MatrixAlgebraKit = "6c742aac-3347-4629-af66-fc926824e5e4"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 TensorKit = "07d1fe3e-3e46-537d-9eac-e9e13d0d4cec"
+TensorKitTensors = "41b62e7d-e9d1-4e23-942c-79a97adf954b"
+VectorInterface = "409d34a3-91d5-4945-b6ec-7529ddf182d8"
 
 [compat]
+AlgorithmsInterface = "0.1.0"
 Dictionaries = "0.4.6"
+Graphs = "1.14.0"
+MatrixAlgebraKit = "0.6.7"
+Random = "1.11.0"
 TensorKit = "0.16.5"
+TensorKitTensors = "0.2.4"
+VectorInterface = "0.5.0"
 julia = "1.10"

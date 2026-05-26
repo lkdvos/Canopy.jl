@@ -104,6 +104,16 @@ function TensorNetworkState(
     return TensorNetworkState{Float64}(undef, pspaces, vspaces)
 end
 
+for f! in (:rand!, :randn!)
+    @eval begin
+        Random.$f!(state::TensorNetworkState) =
+            Random.$f!(Random.default_rng(), state)
+        Random.$f!(rng::Random.AbstractRNG, state::TensorNetworkState) =
+            (foreach(Base.Fix1(Random.$f!, rng), values(state.vertices)); state)
+    end
+end
+
+
 # Properties
 # ----------
 Base.eltype(::Type{TensorNetworkState{T, S, N, A, V}}) where {T, S, N, A, V} = TensorMap{T, S, 1, N, A}
