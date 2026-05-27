@@ -120,21 +120,23 @@ end
 # Eigh-based square root and pseudo-inverse of a Hermitian PSD message,
 # clipping eigenvalues below `tol`.
 function _eigh_sqrt(m; tol::Real)
+    @assert tol ≥ 0 "Tolerance must be positive"
     D, U = eigh_full(m)
-    d = diagview(D)
-    λ = similar(d)
-    λ⁻¹ = similar(d)
-    for i in eachindex(d)
-        dᵢ = max(real(d[i]), zero(real(eltype(d))))
-        if dᵢ > tol
-            λ[i] = sqrt(dᵢ)
+    λ = diagview(D)
+    λ⁻¹ = similar(λ)
+    z = zero(eltype(λ))
+    @inbounds @simd for i in eachindex(λ)
+        λᵢ = λ[i]
+        if λᵢ > tol
+            λ[i] = sqrt(λᵢ)
             λ⁻¹[i] = inv(λ[i])
         else
-            λ[i] = zero(eltype(λ))
-            λ⁻¹[i] = zero(eltype(λ⁻¹))
+            λ⁻¹[i] = λ[i] = z
         end
     end
-    return DiagonalTensorMap(λ) * U', U * DiagonalTensorMap(λ⁻¹)
+    Λ = D * U'
+    Λ⁻¹ = rmul!(U, DiagonalTensorMap(λ⁻¹))
+    return Λ, Λ⁻¹
 end
 
 # `(leg_index, L, Linv)` for each non-partner neighbour of `first(edge)`.
