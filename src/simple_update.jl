@@ -1,7 +1,7 @@
 # --- two-site BP-gauge simple update -----------------------------------------
 function apply!(
         state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 2};
-        trunc = notrunc(), gauge_tol::Real = 0.0, timer = nothing,
+        trunc = notrunc(), gauge_tol::Real = 0.0, normp::Real = 2, timer = nothing,
     )
     return @maybe_timeit timer "apply! 2-site" begin
         _check_compatible(state, gate)
@@ -40,9 +40,17 @@ function apply!(
             svd_trunc!(θ; trunc)
         end
 
-        # Split √Σ half/half; keep `Σdiag` for the bond-message update
         Σdiag = collect(scalartype(msgs), diagview(Σ))
-        diagview(Σ) .= sqrt.(diagview(Σ))
+        T = real(scalartype(state))
+        if normp == 0
+            logλ = zero(T)
+            diagview(Σ) .= sqrt.(diagview(Σ))
+        else
+            α = norm(Σdiag, normp)
+            logλ = log(α)
+            Σdiag ./= α
+            diagview(Σ) .= sqrt.(diagview(Σ) ./ α)
+        end
         rmul!(U, Σ)
         lmul!(Σ, Vᴴ)
 
@@ -67,7 +75,7 @@ function apply!(
         V′ᵈ = virtualspace(state, DirectedEdge(s₂, s₁))
         msgs.messages[DirectedEdge(s₁, s₂)] = DiagonalTensorMap(Σdiag, V′ᵈ)
 
-        (state, msgs, ϵ)
+        (state, msgs, (; ϵ, logλ))
     end
 end
 

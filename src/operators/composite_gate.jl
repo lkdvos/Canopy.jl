@@ -26,10 +26,13 @@ function apply!(
     return @maybe_timeit timer "apply! CompositeGate" begin
         T = real(scalartype(state))
         ϵ = similar(gates.gatelist, T)
+        logλ = similar(gates.gatelist, T)
         Threads.@threads for i in eachindex(gates.gatelist)
-            state, msgs, ϵ[i] = apply!(state, msgs, gates.gatelist[i]; timer, kwargs...)
+            state, msgs, info = apply!(state, msgs, gates.gatelist[i]; timer, kwargs...)
+            ϵ[i] = info.ϵ
+            logλ[i] = info.logλ
         end
-        (state, msgs, maximum(ϵ))
+        (state, msgs, (; ϵ = maximum(ϵ), logλ = sum(logλ)))
     end
 end
 
@@ -50,10 +53,12 @@ function apply!(
     return @maybe_timeit timer "apply! Circuit" begin
         T = real(scalartype(state))
         ϵ = zero(T)
+        logλ = zero(T)
         for gate in circuit.gatelist
-            state, msgs, ϵ_local = apply!(state, msgs, gate; timer, kwargs...)
-            ϵ = max(ϵ, ϵ_local)
+            state, msgs, info = apply!(state, msgs, gate; timer, kwargs...)
+            ϵ = max(ϵ, info.ϵ)
+            logλ += info.logλ
         end
-        (state, msgs, ϵ)
+        (state, msgs, (; ϵ, logλ))
     end
 end

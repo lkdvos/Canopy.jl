@@ -39,9 +39,14 @@ function _check_compatible(state::TensorNetworkState, gate::LocalGate{<:Any, N})
 end
 
 @doc """
-    apply!(state, msgs, gate::LocalGate; kwargs...) -> state, msgs, ϵ
+    apply!(state, msgs, gate::LocalGate; kwargs...) -> state, msgs, info
 
-In-place application of `gate` onto `state`.
+In-place application of `gate` onto `state`. Returns `info = (; ϵ, logλ)`:
+`ϵ` is the truncation error and `logλ` is the log of the bond-message norm
+absorbed during normalization. The 2-site method renormalizes the new bond
+message to unit `normp`-norm (kwarg `normp::Real = 2`; `normp = 0` disables
+normalization and returns `logλ = 0`). The 1-site method does not touch any
+bond message and always returns `logλ = 0`.
 """ apply!
 
 # --- single-site -------------------------------------------------------------
@@ -53,6 +58,7 @@ function apply!(
         _check_compatible(state, gate)
         v = only(gate.sites)
         state.vertices[v] = gate.tensor * state[v]
-        (state, msgs, zero(real(scalartype(state))))
+        T = real(scalartype(state))
+        (state, msgs, (; ϵ = zero(T), logλ = zero(T)))
     end
 end
