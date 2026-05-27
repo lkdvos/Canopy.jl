@@ -19,14 +19,18 @@ function CompositeGate(gatelist::Vector{G}) where {G <: LocalGate}
     return CompositeGate{scalartype(G), spacetype(G), V, G}(gatelist)
 end
 
-function apply!(state::TensorNetworkState, msgs::BPMessages, gates::CompositeGate; kwargs...)
-    T = real(scalartype(state))
-    ϵ = zero(T)
-    for gate in gates.gatelist
-        state, msgs, ϵ_local = apply!(state, msgs, gate; kwargs...)
-        ϵ = max(ϵ, ϵ_local)
+function apply!(
+        state::TensorNetworkState, msgs::BPMessages, gates::CompositeGate;
+        timer = nothing, kwargs...,
+    )
+    return @maybe_timeit timer "apply! CompositeGate" begin
+        T = real(scalartype(state))
+        ϵ = similar(gates.gatelist, T)
+        Threads.@threads for i in eachindex(gates.gatelist)
+            state, msgs, ϵ[i] = apply!(state, msgs, gates.gatelist[i]; timer, kwargs...)
+        end
+        (state, msgs, maximum(ϵ))
     end
-    return state, msgs, ϵ
 end
 
 """
@@ -39,12 +43,17 @@ struct Circuit{T <: Number, S <: ElementarySpace, V, G <: AbstractGate{T, S, V}}
     gatelist::Vector{G}
 end
 
-function apply!(state::TensorNetworkState, msgs::BPMessages, circuit::Circuit; kwargs...)
-    T = real(scalartype(state))
-    ϵ = zero(T)
-    for gate in circuit.gatelist
-        state, msgs, ϵ_local = apply!(state, msgs, gate; kwargs...)
-        ϵ = max(ϵ, ϵ_local)
+function apply!(
+        state::TensorNetworkState, msgs::BPMessages, circuit::Circuit;
+        timer = nothing, kwargs...,
+    )
+    return @maybe_timeit timer "apply! Circuit" begin
+        T = real(scalartype(state))
+        ϵ = zero(T)
+        for gate in circuit.gatelist
+            state, msgs, ϵ_local = apply!(state, msgs, gate; timer, kwargs...)
+            ϵ = max(ϵ, ϵ_local)
+        end
+        (state, msgs, ϵ)
     end
-    return state, msgs, ϵ
 end

@@ -14,13 +14,14 @@ using AlgorithmsInterface: StopAfter
 using TensorKit
 using TensorKit: TupleTools
 using MatrixAlgebraKit: diagview, eigh_full, eigh_vals!, qr_compact, svd_trunc, svd_vals!, truncrank, trunctol
+using TimerOutputs: TimerOutput, @timeit
 using VectorInterface
 
 include("edges.jl")
 
 include("states.jl")
-include("messages.jl")
 include("utility.jl")
+include("messages.jl")
 
 include("expect.jl")
 

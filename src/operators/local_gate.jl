@@ -46,10 +46,13 @@ In-place application of `gate` onto `state`.
 
 # --- single-site -------------------------------------------------------------
 function apply!(
-        state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 1}; kwargs...
+        state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 1};
+        timer = nothing, kwargs...,
     )
-    _check_compatible(state, gate)
-    v = only(gate.sites)
-    state.vertices[v] = gate.tensor * state[v]
-    return state, msgs, zero(real(scalartype(state)))
+    return @maybe_timeit timer "apply! 1-site" begin
+        _check_compatible(state, gate)
+        v = only(gate.sites)
+        state.vertices[v] = gate.tensor * state[v]
+        (state, msgs, zero(real(scalartype(state))))
+    end
 end
