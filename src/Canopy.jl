@@ -12,7 +12,8 @@ using AlgorithmsInterface: AlgorithmsInterface as AI
 using AlgorithmsInterface: StopAfter
 
 using TensorKit
-using MatrixAlgebraKit: eigh_vals!, svd_vals!
+using TensorKit: TupleTools
+using MatrixAlgebraKit: diagview, eigh_full, eigh_vals!, qr_compact, svd_trunc, svd_vals!, truncrank, trunctol
 using VectorInterface
 
 include("edges.jl")
@@ -25,7 +26,7 @@ include("expect.jl")
 
 include("simple_update.jl")
 
-export apply_gate!
+export LocalGate, apply!
 
 include("evolve.jl")
 

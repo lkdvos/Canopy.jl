@@ -145,6 +145,26 @@ end
 # BP contractions
 # ---------------
 
+# Shared primitive: absorb a `V_k ← V_k` factor on selected domain legs of
+# `T`. For each `(k, factor)` in `leg_factors`, the factor's domain contracts
+# against `T`'s domain leg at slot `k` and the factor's codomain takes its
+# place. Legs not listed pass through unchanged, so the result has the same
+# `TensorMap` space as `T`.
+function _absorb_legs(T, leg_factors)
+    N = numind(T)
+    tensors = Any[T]
+    T_idx = Int[-i for i in 1:N]
+    indices = Vector{Int}[T_idx]
+    next_label = 0
+    for (k, L) in leg_factors
+        T_idx[k + 1] = (next_label += 1)
+        push!(tensors, L)
+        push!(indices, [-(k + 1), T_idx[k + 1]])
+    end
+    raw = ncon(tensors, indices)
+    return permute(raw, ((1,), ntuple(i -> i + 1, N - 1)))
+end
+
 """
     attach_messages(state, msgs, site, edges) -> StateTensor
 
@@ -166,23 +186,11 @@ unchanged.
 function attach_messages(
         state::TensorNetworkState, msgs::BPMessages, site, edges
     )
-    T = state[site]
-    N = numind(T)
-
-    tensors = Any[T]
-    T_idx = Int[-i for i in 1:N]
-    indices = Vector{Int}[T_idx]
-    next_label = 0
-    for e in edges
+    leg_factors = map(edges) do e
         last(e) == site || throw(ArgumentError(lazy"edge $e does not terminate at $site"))
-        k = leg_index(state, reverse(e))
-        T_idx[k + 1] = (next_label += 1)
-        push!(tensors, msgs[e])
-        push!(indices, [-(k + 1), T_idx[k + 1]])
+        return (leg_index(state, reverse(e)), msgs[e])
     end
-
-    raw = ncon(tensors, indices)
-    return permute(raw, ((1,), ntuple(i -> i + 1, numin(T))))::eltype(state)
+    return _absorb_legs(state[site], leg_factors)::eltype(state)
 end
 
 """
