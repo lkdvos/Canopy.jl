@@ -80,7 +80,7 @@ function BPMessages(state::TensorNetworkState)
     TT = MessageTensor{scalartype(state), spacetype(state), TensorKit.storagetype(state)}
     messages = Dictionary{K, TT}()
     for edge in Graphs.edges(state)
-        edge_fwd = DirectedEdge(Tuple(edge)...)
+        edge_fwd = DirectedEdge(edge)
         V_fwd = virtualspace(state, reverse(edge_fwd))
         msg_fwd = TensorKit.id!(TT(undef, V_fwd ← V_fwd))
         insert!(messages, edge_fwd, msg_fwd)
@@ -131,7 +131,7 @@ function check_consistency(state::TensorNetworkState, msgs::BPMessages)
     2 * length(edges) == length(msgs.messages) || return false
 
     for edge in edges
-        edge_fwd = DirectedEdge(Tuple(edge)...)
+        edge_fwd = DirectedEdge(edge)
         (haskey(msgs, edge_fwd) && haskey(msgs, reverse(edge_fwd))) || return false
 
         V_recv_fwd = virtualspace(state, reverse(edge_fwd))
