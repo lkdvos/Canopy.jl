@@ -24,13 +24,23 @@ include("utility.jl")
 
 include("expect.jl")
 
+include("operators/abstract_gate.jl")
+export AbstractGate
+
+include("operators/local_gate.jl")
+export LocalGate, apply!
+
 include("simple_update.jl")
 
-export LocalGate, apply!
+include("operators/composite_gate.jl")
+export CompositeGate, Circuit
+
+include("operators/trotterize.jl")
+export TrotterScheme, Strang, trotterize, edge_coloring
 
 include("evolve.jl")
 
-export edge_coloring, trotter_step!, imaginary_time_evolve!
+export trotter_step!, imaginary_time_evolve!
 
 include("models.jl")
 
