@@ -110,9 +110,7 @@ function _gauge_factors(
     M = eltype(msgs)
     factors = Vector{Tuple{Int, M, M}}()
     site = first(edge)
-    for n in neighbors(state, site)
-        n == last(edge) && continue
-        incoming = DirectedEdge(n, site)
+    for incoming in incoming_edges(state, site; exclude=(last(edge),))
         k = leg_index(state, reverse(incoming))
         L, Linv = _eigh_sqrt(msgs[incoming]; tol)
         push!(factors, (k, L, Linv))

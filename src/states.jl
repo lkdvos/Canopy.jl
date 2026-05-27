@@ -191,7 +191,7 @@ end
 
 Return the collection of vertices of `state`.
 """
-Graphs.vertices(state::TensorNetworkState) = keys(state.vertices)
+vertices(state::TensorNetworkState) = keys(state.vertices)
 
 """
     edges(state)
@@ -199,9 +199,9 @@ Graphs.vertices(state::TensorNetworkState) = keys(state.vertices)
 Return the set of undirected edges of `state` in canonical orientation
 (`first(e) < last(e)`).
 """
-function Graphs.edges(state::TensorNetworkState)
+function edges(state::TensorNetworkState)
     es = Indices{UndirectedEdge{keytype(state)}}()
-    for v₁ in Graphs.vertices(state), v₂ in neighbors(state, v₁)
+    for v₁ in vertices(state), v₂ in neighbors(state, v₁)
         v₁ < v₂ && insert!(es, UndirectedEdge(v₁, v₂))
     end
     return es
@@ -213,6 +213,49 @@ end
 Return the list of neighbors of vertex `v`, in the order matching the virtual legs of `state[v]`.
 """
 neighbors(state::TensorNetworkState, v) = state.adjacency[v]
+
+"""
+    has_vertex(state, v) -> Bool
+
+Return `true` if `v` is a vertex of `state`.
+"""
+has_vertex(state::TensorNetworkState, v) = haskey(state.adjacency, v)
+
+"""
+    has_edge(state, u, v) -> Bool
+    has_edge(state, e::UndirectedEdge) -> Bool
+
+Return `true` if `state` has an edge between `u` and `v` (equivalently, if
+`v` is a neighbor of `u`).
+"""
+function has_edge(state::TensorNetworkState, u, v)
+    return haskey(state.adjacency, u) && v in state.adjacency[u]
+end
+has_edge(state::TensorNetworkState, e::UndirectedEdge) =
+    has_edge(state, first(e), last(e))
+
+"""
+    degree(state, v) -> Int
+
+Return the number of neighbors of vertex `v` in `state`, i.e. its local
+coordination number. This equals `length(neighbors(state, v))`.
+"""
+degree(state::TensorNetworkState, v) = length(neighbors(state, v))
+
+"""
+    incoming_edges(state, site; exclude=()) -> generator
+
+Iterator over the directed edges `DirectedEdge(n, site)` for every neighbor
+`n` of `site` in `state`, optionally skipping any neighbor present in
+`exclude` (which must be an iterable container of vertex tokens — pass
+`(other_vertex,)` to skip a single neighbor).
+
+The result is a lazy generator suitable for `attach_messages`, `map`, and
+`for` loops. Order matches `neighbors(state, site)`.
+"""
+function incoming_edges(state::TensorNetworkState, site; exclude=())
+    return (DirectedEdge(n, site) for n in neighbors(state, site) if !(n in exclude))
+end
 
 """
     leg_index(state, edge) -> Int
@@ -248,7 +291,7 @@ function TensorKit.TensorMap(state::TensorNetworkState)
     edge_label = Dict{UndirectedEdge{V}, Int}()
     next_label = Ref(0)
 
-    for (i, v) in enumerate(Graphs.vertices(state))
+    for (i, v) in enumerate(vertices(state))
         T = state[v]
         adj = neighbors(state, v)
         d = length(adj)
@@ -280,7 +323,7 @@ function Base.show(io::IO, ::MIME"text/plain", state::TensorNetworkState)
     print(io, " with ", length(state), " vertices:")
     indent = '\t'
     inner = IOContext(io, :typeinfo => eltype(state))
-    for v in Graphs.vertices(state)
+    for v in vertices(state)
         println(io)
         println(io)
         print(io, " vertex ", v, ":")

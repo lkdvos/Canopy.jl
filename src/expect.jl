@@ -40,7 +40,7 @@ function reduced_density_matrix(
         sites::NTuple{1, V}, state::TensorNetworkState, messages::BPMessages,
     ) where {V}
     site = only(sites)
-    Tm = attach_messages(state, messages, site, (DirectedEdge(n, site) for n in neighbors(state, site)))
+    Tm = attach_all_messages(state, messages, site)
     Td = state[site]'
     tensors = Any[Tm, Td]
     indices = [vcat([-1], 2:numind(Tm)), vcat(2:numind(Td), [-2])]
@@ -51,16 +51,10 @@ end
 function reduced_density_matrix(
         sites::NTuple{2, V}, state::TensorNetworkState, messages::BPMessages,
     ) where {V}
-    haskey(Graphs.edges(state), UndirectedEdge(sites...)) || error("not implemented")
+    has_edge(state, sites...) || error("not implemented")
 
-    T₁ = attach_messages(
-        state, messages, sites[1],
-        (DirectedEdge(n, sites[1]) for n in neighbors(state, sites[1]) if n != sites[2])
-    )
-    T₂ = attach_messages(
-        state, messages, sites[2],
-        (DirectedEdge(n, sites[2]) for n in neighbors(state, sites[2]) if n != sites[1])
-    )
+    T₁ = attach_messages(state, messages, sites[1], incoming_edges(state, sites[1]; exclude=(sites[2],)))
+    T₂ = attach_messages(state, messages, sites[2], incoming_edges(state, sites[2]; exclude=(sites[1],)))
     tensors = Any[T₁, T₂, state[sites[1]]', state[sites[2]]']
     indices = [
         vcat([-1], 2:numind(T₁)),

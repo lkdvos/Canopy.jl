@@ -79,7 +79,7 @@ function BPMessages(state::TensorNetworkState)
     K = DirectedEdge{keytype(state)}
     TT = MessageTensor{scalartype(state), spacetype(state), TensorKit.storagetype(state)}
     messages = Dictionary{K, TT}()
-    for edge in Graphs.edges(state)
+    for edge in edges(state)
         edge_fwd = DirectedEdge(edge)
         V_fwd = virtualspace(state, reverse(edge_fwd))
         msg_fwd = TensorKit.id!(TT(undef, V_fwd ← V_fwd))
@@ -127,10 +127,10 @@ Does not check that the messages are a BP fixed point; only that their
 spaces line up with `state`.
 """
 function check_consistency(state::TensorNetworkState, msgs::BPMessages)
-    edges = Graphs.edges(state)
-    2 * length(edges) == length(msgs.messages) || return false
+    es = edges(state)
+    2 * length(es) == length(msgs.messages) || return false
 
-    for edge in edges
+    for edge in es
         edge_fwd = DirectedEdge(edge)
         (haskey(msgs, edge_fwd) && haskey(msgs, reverse(edge_fwd))) || return false
 
@@ -194,6 +194,16 @@ function attach_messages(
 end
 
 """
+    attach_all_messages(state, msgs, site) -> StateTensor
+
+Convenience wrapper for [`attach_messages`](@ref): absorbs *every* incoming
+BP message at `site` into the corresponding virtual leg of `state[site]`.
+Equivalent to `attach_messages(state, msgs, site, incoming_edges(state, site))`.
+"""
+attach_all_messages(state::TensorNetworkState, msgs::BPMessages, site) =
+    attach_messages(state, msgs, site, incoming_edges(state, site))
+
+"""
     compute_message(msgs, state, edge::DirectedEdge) -> MessageTensor
     compute_message!(out, msgs, state, edge::DirectedEdge) -> out
 
@@ -219,11 +229,7 @@ function compute_message!(msg, msgs::BPMessages, state::TensorNetworkState, edge
     T = state[site]
     N = numind(T)
 
-    incoming = (
-        DirectedEdge(n, site) for n in neighbors(state, site)
-            if n != last(edge)
-    )
-    Tm = attach_messages(state, msgs, site, incoming)
+    Tm = attach_messages(state, msgs, site, incoming_edges(state, site; exclude=(last(edge),)))
 
     Tm_idx = replace(1:N, (target + 1) => -2)
     Td_idx = replace(vcat(2:N, [1]), (target + 1) => -1)

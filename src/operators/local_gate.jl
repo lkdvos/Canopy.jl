@@ -28,7 +28,7 @@ LocalGate(sites::NTuple{N, V}, tensor::TT) where {T, N, S, V, TT <: AbstractTens
 
 function _check_compatible(state::TensorNetworkState, gate::LocalGate{<:Any, N}) where {N}
     for s in gate.sites
-        haskey(state.vertices, s) || throw(KeyError(s))
+        has_vertex(state, s) || throw(KeyError(s))
     end
     for i in 1:N
         P = physicalspace(state, gate.sites[i])

@@ -6,6 +6,8 @@ export TensorNetworkState, BPMessages
 
 using Dictionaries
 using Graphs: Graphs
+using Graphs: src, dst, nv, ne
+import Graphs: vertices, edges, neighbors, degree, has_vertex, has_edge
 using Random: Random
 
 using AlgorithmsInterface: AlgorithmsInterface as AI
