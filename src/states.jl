@@ -104,6 +104,36 @@ function TensorNetworkState(
     return TensorNetworkState{Float64}(undef, pspaces, vspaces)
 end
 
+"""
+    TensorNetworkState{T}(undef, g::Graphs.AbstractGraph, P::S, V::S)
+    TensorNetworkState(undef, g::Graphs.AbstractGraph, P::S, V::S)
+
+Convenience constructor for a [`TensorNetworkState`](@ref) on a
+`Graphs.jl` graph `g`, with uniform per-vertex physical space `P` and
+uniform per-edge virtual space `V`.
+
+Vertex tokens are taken as `vertices(g)` (an `Int` range for the standard
+`Graphs.SimpleGraph` family). Edges are converted to canonical
+[`UndirectedEdge`](@ref)s. The on-site tensors are left uninitialized;
+call `Random.randn!`/`Random.rand!` on the result to fill them.
+"""
+function TensorNetworkState{T}(
+        ::UndefInitializer, g::Graphs.AbstractGraph, P::S, V::S,
+    ) where {T, S <: IndexSpace}
+    pspaces = Dictionary(vertices(g), fill(P, nv(g)))
+    vspaces = Dictionary(
+        [UndirectedEdge(src(e), dst(e)) for e in edges(g)],
+        fill(V, ne(g)),
+    )
+    return TensorNetworkState{T}(undef, pspaces, vspaces)
+end
+
+function TensorNetworkState(
+        ::UndefInitializer, g::Graphs.AbstractGraph, P::S, V::S,
+    ) where {S <: IndexSpace}
+    return TensorNetworkState{Float64}(undef, g, P, V)
+end
+
 for f! in (:rand!, :randn!)
     @eval begin
         Random.$f!(state::TensorNetworkState) =
