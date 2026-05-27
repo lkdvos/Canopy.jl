@@ -136,7 +136,7 @@ function check_consistency(state::TensorNetworkState, msgs::BPMessages)
 
         V_recv_fwd = virtualspace(state, reverse(edge_fwd))
         V_recv_bwd = virtualspace(state, edge_fwd)
-        space(msgs[edge_fwd])          == (V_recv_fwd ← V_recv_fwd) || return false
+        space(msgs[edge_fwd]) == (V_recv_fwd ← V_recv_fwd) || return false
         space(msgs[reverse(edge_fwd)]) == (V_recv_bwd ← V_recv_bwd) || return false
     end
     return true
@@ -269,44 +269,73 @@ end
 
 # BP Algorithm
 # ------------
-struct BeliefPropagation{S <: AI.StoppingCriterion} <: AI.Algorithm
+struct BeliefPropagation{S <: AI.StoppingCriterion, TO} <: AI.Algorithm
     stopping_criterion::S
+    timer::TO
 end
+BeliefPropagation(stopping_criterion::AI.StoppingCriterion) =
+    BeliefPropagation(stopping_criterion, nothing)
 
 struct BPProblem{N} <: AI.Problem
     network::N
 end
 
-mutable struct BPState{M, S} <: AI.State
+mutable struct BPState{M, S, V} <: AI.State
     iterate::M
+    residuals::Dictionary{DirectedEdge{V}, Float64}
     iteration::Int
     stopping_criterion_state::S
 end
 
-function AI.initialize_state(problem::BPProblem, algorithm::BeliefPropagation; kwargs...)
-    messages = BPMessages(problem.network)
-    stopping_state = AI.initialize_state(problem, algorithm, algorithm.stopping_criterion)
-    return BPState(messages, 0, stopping_state)
+function AI.initialize_state(
+        problem::BPProblem, algorithm::BeliefPropagation;
+        messages::BPMessages = BPMessages(problem.network), kwargs...,
+    )
+    residuals = map(Returns(Inf), keys(messages.messages))
+    stopping_state = AI.initialize_state(problem, algorithm, algorithm.stopping_criterion; kwargs...)
+    return BPState(messages, residuals, 0, stopping_state)
 end
 
-function AI.initialize_state!(problem::BPProblem, algorithm::BeliefPropagation, state::BPState; kwargs...)
-    state.iterate = BPMessages(problem.network)
-    state.stopping_criterion_state = AI.initialize_state!(problem, algorithm, algorithm.stopping_criterion, state.stopping_criterion_state)
-    return BPState(messages, 0, stopping_state)
-end
-
-function AI.step!(problem::BPProblem, ::BeliefPropagation, state::BPState)
-    messages = map(keys(state.iterate.messages)) do edge
-        return normalize!(compute_message(state.iterate, problem.network, edge))
-    end
-    state.iterate = BPMessages(messages)
+function AI.initialize_state!(
+        problem::BPProblem, algorithm::BeliefPropagation, state::BPState;
+        messages::Union{BPMessages, Nothing} = nothing, kwargs...,
+    )
+    state.iterate = something(messages, BPMessages(problem.network))
+    map!(state.residuals, Inf)
+    state.iteration = 0
+    state.stopping_criterion_state = AI.initialize_state!(
+        problem, algorithm, algorithm.stopping_criterion, state.stopping_criterion_state;
+        kwargs...,
+    )
     return state
 end
 
-function belief_propagation(messages, state::TensorNetworkState; maxiter::Int)
-    stopping_criterion = AI.StopAfterIteration(maxiter)
-    alg = BeliefPropagation(stopping_criterion)
-    return AI.solve(BPProblem(state), alg)
+function AI.step!(problem::BPProblem, alg::BeliefPropagation, state::BPState)
+    @maybe_timeit alg.timer "bp_iteration" begin
+        old = state.iterate
+        new_dict = Dictionary{keytype(old.messages), eltype(old)}()
+        for edge in keys(old.messages)
+            new_msg = @maybe_timeit alg.timer "compute_message" begin
+                normalize!(project_hermitian!(compute_message(old, problem.network, edge)))
+            end
+            insert!(new_dict, edge, new_msg)
+            state.residuals[edge] = tr_distance(old[edge], new_msg; is_hermitian = true)
+        end
+        state.iterate = BPMessages(new_dict)
+    end
+    return state
+end
+
+function belief_propagation(
+        messages::BPMessages, state::TensorNetworkState;
+        maxiter::Int, tol::Real = 0, timer = nothing,
+    )
+    stopping = AI.StopAfterIteration(maxiter)
+    tol > 0 && (stopping = stopping | StopWhenStable(tol))
+    alg = BeliefPropagation(stopping, timer)
+    return @maybe_timeit timer "belief_propagation" begin
+        AI.solve(BPProblem(state), alg; messages)
+    end
 end
 
 iterate_difference!(prev_messages::BPMessages, messages::BPMessages) =
