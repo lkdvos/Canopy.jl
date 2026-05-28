@@ -26,6 +26,7 @@ include("utility.jl")
 include("messages.jl")
 
 include("expect.jl")
+export expect
 
 include("operators/abstract_gate.jl")
 export AbstractGate

@@ -74,3 +74,25 @@ function reduced_density_matrix(
     ρ = twist!(repartition(ncon(tensors, indices), 2, 2), (1, 2))
     return scale!(ρ, inv(tr(ρ)))
 end
+
+"""
+    expect(state, msgs, op, sites) -> Number
+
+Bethe-approximated expectation value `⟨ψ|op|ψ⟩ / ⟨ψ|ψ⟩` of `op` over
+`sites`, computed as `tr(op * reduced_density_matrix(sites, state, msgs))`.
+
+`sites` may be:
+- a single vertex token `v` — equivalent to `(v,)`,
+- an `NTuple{N, V}` of vertex tokens for a single-site (`N=1`), two-site
+  (`N=2`), or path region (general `N`),
+- an `UndirectedEdge` — equivalent to `(first(e), last(e))`.
+
+`op` must have matching `TensorMap` space — see [`reduced_density_matrix`](@ref)
+for the leg convention.
+"""
+expect(state::TensorNetworkState, msgs::BPMessages, op, sites::Tuple) =
+    tr(op * reduced_density_matrix(sites, state, msgs))
+expect(state::TensorNetworkState, msgs::BPMessages, op, v) =
+    expect(state, msgs, op, (v,))
+expect(state::TensorNetworkState, msgs::BPMessages, op, e::UndirectedEdge) =
+    expect(state, msgs, op, (first(e), last(e)))
