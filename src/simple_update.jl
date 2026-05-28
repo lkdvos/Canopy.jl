@@ -110,10 +110,12 @@ function _gauge_factors(
     M = eltype(msgs)
     factors = Vector{Tuple{Int, M, M}}()
     site = first(edge)
-    for incoming in incoming_edges(state, site; exclude=(last(edge),))
+    for incoming in incoming_edges(state, site; exclude = (last(edge),))
         k = leg_index(state, reverse(incoming))
-        L, Linv = _eigh_sqrt(msgs[incoming]; tol)
-        push!(factors, (k, L, Linv))
+        m = msgs[incoming]
+        Λ, Λ⁻¹ = _eigh_sqrt(m; tol)
+        isdual(space(m, 1)) && twist!(Λ⁻¹, 1)
+        push!(factors, (k, Λ, Λ⁻¹))
     end
     return factors
 end
