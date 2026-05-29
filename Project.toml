@@ -4,7 +4,7 @@ version = "0.1.0-DEV"
 authors = ["lkdvos <ldevos98@gmail.com> and contributors"]
 
 [workspace]
-projects = ["test", "docs"]
+projects = ["test", "docs", "examples"]
 
 [deps]
 AlgorithmsInterface = "d1e3940c-cd12-4505-8585-b0a4b322527d"

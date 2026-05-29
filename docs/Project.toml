@@ -1,0 +1,11 @@
+name = "CanopyDocs"
+
+[deps]
+Canopy = "98ee57e9-4953-4dfe-8aed-2a71ed84f5ba"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+
+[sources]
+Canopy = {path = ".."}
+
+[compat]
+Documenter = "1"
