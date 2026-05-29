@@ -1,5 +1,7 @@
 # Canopy
 
+[![CI](https://github.com/lkdvos/Canopy/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/lkdvos/Canopy/actions/workflows/CI.yml?query=branch%3Amain)
+[![codecov](https://codecov.io/gh/lkdvos/Canopy/branch/main/graph/badge.svg)](https://codecov.io/gh/lkdvos/Canopy)
 [![Documentation](https://github.com/lkdvos/Canopy/actions/workflows/Documentation.yml/badge.svg?branch=main)](https://github.com/lkdvos/Canopy/actions/workflows/Documentation.yml?query=branch%3Amain)
 
 A [TensorKit.jl](https://github.com/Jutho/TensorKit.jl)-based library for tensor network states on arbitrary graphs, targeting belief-propagation and simple-update algorithms.

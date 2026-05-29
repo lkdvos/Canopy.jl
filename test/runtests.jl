@@ -1,6 +1,4 @@
 using Canopy
-using Test
+using ParallelTestRunner
 
-@testset "Canopy.jl" begin
-    # Write your tests here.
-end
+runtests(Canopy, ARGS)

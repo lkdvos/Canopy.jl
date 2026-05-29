@@ -42,11 +42,4 @@ export CompositeGate, Circuit
 include("operators/trotterize.jl")
 export TrotterScheme, Strang, trotterize, edge_coloring
 
-include("evolve.jl")
-
-export trotter_step!, imaginary_time_evolve!
-
-include("models.jl")
-
-
 end

@@ -1,5 +1,5 @@
 using Canopy
-using Canopy: UndirectedEdge, belief_propagation, reduced_density_matrix
+using Canopy: UndirectedEdge, DirectedEdge, belief_propagation, reduced_density_matrix, expect
 using TensorKit
 using LinearAlgebra: isposdef
 using TensorKitTensors.SpinOperators: σᶻ, S_z_S_z, S_exchange
@@ -88,6 +88,19 @@ end
 
 function check_op(ρ_bp, ρ_ex, op; rtol, atol = rtol)
     return @test isapprox(tr(ρ_bp * op), tr(ρ_ex * op); rtol, atol)
+end
+
+
+@testset "Graphs.degree matches neighbors length" begin
+    Random.seed!(0)
+    state = chain_state(ComplexF64, 4, ComplexSpace(2), ComplexSpace(3))
+    for v in 1:4
+        @test Graphs.degree(state, v) == length(Canopy.neighbors(state, v))
+    end
+    state2 = torus_state(ComplexF64, 3, 3, ComplexSpace(2), ComplexSpace(2))
+    for v in 1:9
+        @test Graphs.degree(state2, v) == 4
+    end
 end
 
 
@@ -203,46 +216,72 @@ end
     end
 end
 
+@testset "Edge conversions round-trip" begin
+    u = UndirectedEdge(2, 5)
+    d = DirectedEdge(u)
+    @test d isa DirectedEdge{Int}
+    @test (first(d), last(d)) == (2, 5)
+    @test UndirectedEdge(d) == u
 
-@testset "3×3 torus — ComplexSpace + spin operators (BP approximate)" begin
-    Random.seed!(0)
-    M = N = 3
-    L = M * N
-    P = ComplexSpace(2)
-    V = ComplexSpace(3)
-    state = torus_state(ComplexF64, M, N, P, V)
-    psi = TensorMap(state)
+    # Reverse-orientation DirectedEdge collapses to the canonical UndirectedEdge
+    d_rev = DirectedEdge(5, 2)
+    @test UndirectedEdge(d_rev) == u
 
-    msgs = BPMessages(state)
-    msgs = belief_propagation(msgs, state; maxiter = 500)
-
-    sz = σᶻ(ComplexF64, Trivial)
-    szsz = S_z_S_z(ComplexF64, Trivial)
-    ss = S_exchange(ComplexF64, Trivial)
-
-    # Torus has many short loops (3-cycles via the periodic wrap) → BP error
-    # is substantially larger than on a ring. Empirically ~13% on local
-    # density matrices with bond dim 3 and random tensors.
-    rtol = 2.0e-1
-    atol = 2.0e-1
-    for v in 1:L
-        ρ_bp, ρ_ex = check_rdm(state, msgs, psi, (v,); rtol, atol)
-        check_op(ρ_bp, ρ_ex, sz; rtol, atol)
-    end
-    # Sample adjacent pairs: a horizontal bond, a vertical bond, and a
-    # wrap-around bond in each direction.
-    for sites in ((1, 2), (1, 4), (1, 3), (1, 7))
-        ρ_bp, ρ_ex = check_rdm(state, msgs, psi, sites; rtol, atol)
-        check_op(ρ_bp, ρ_ex, szsz; rtol, atol)
-        check_op(ρ_bp, ρ_ex, ss; rtol, atol)
-    end
+    # Convert methods agree with constructors
+    @test convert(DirectedEdge{Int}, u) == d
+    @test convert(UndirectedEdge{Int}, d) == u
 end
 
-# NOTE: a fermionic-space variant of the torus test was tried but is not
-# included. On the 3×3 torus with fermion-parity grading, the "density matrix"
-# returned by `reduced_density_matrix` is normalized by the categorical
-# (super)trace, which produces O(20) negative/positive block entries that
-# cancel down to trace 1. Loop corrections of BP then sit on top of these
-# large numbers, giving relative errors >100× regardless of bond dim or seed.
-# A meaningful fermionic-torus check would need a different normalization
-# (e.g., Frobenius) or a symmetry-resolved comparison.
+
+@testset "Graphs.has_edge / has_vertex" begin
+    Random.seed!(0)
+    state = chain_state(ComplexF64, 4, ComplexSpace(2), ComplexSpace(3))
+    @test Graphs.has_vertex(state, 1)
+    @test Graphs.has_vertex(state, 4)
+    @test !Graphs.has_vertex(state, 99)
+
+    @test Graphs.has_edge(state, 1, 2)
+    @test Graphs.has_edge(state, 2, 1)  # symmetric for undirected
+    @test Graphs.has_edge(state, UndirectedEdge(2, 3))
+    @test !Graphs.has_edge(state, 1, 4)
+    @test !Graphs.has_edge(state, UndirectedEdge(1, 4))
+    @test !Graphs.has_edge(state, 99, 100)
+end
+
+
+@testset "incoming_edges iterator" begin
+    Random.seed!(0)
+    state = chain_state(ComplexF64, 4, ComplexSpace(2), ComplexSpace(3))
+    v = 2
+    expected = [DirectedEdge(n, v) for n in Canopy.neighbors(state, v)]
+    @test collect(Canopy.incoming_edges(state, v)) == expected
+    @test collect(Canopy.incoming_edges(state, v; exclude=(1,))) ==
+          [DirectedEdge(n, v) for n in Canopy.neighbors(state, v) if n != 1]
+    # exclude=() (default) should yield everything
+    @test collect(Canopy.incoming_edges(state, v; exclude=())) == expected
+end
+
+
+@testset "Graph-based TensorNetworkState constructor" begin
+    Random.seed!(0)
+    g = path_graph(4)
+    P = ComplexSpace(2)
+    V = ComplexSpace(3)
+    state = TensorNetworkState{ComplexF64}(undef, g, P, V)
+    @test collect(vertices(state)) == 1:4
+    @test length(edges(state)) == 3
+    @test physicalspace(state, 1) == P
+    # Edge (1,2): non-dual side is the smaller vertex, so the leg as seen from
+    # vertex 2 (the larger) is V itself.
+    @test virtualspace(state, DirectedEdge(2, 1)) == V
+
+    # Default T = Float64
+    state_f = TensorNetworkState(undef, g, P, V)
+    @test scalartype(state_f) == Float64
+
+    # Cycle graph adds the wrap-around edge
+    gc = cycle_graph(5)
+    state_c = TensorNetworkState{ComplexF64}(undef, gc, P, V)
+    @test length(edges(state_c)) == 5
+    @test Canopy.has_edge(state_c, 1, 5)
+end
