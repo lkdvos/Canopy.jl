@@ -29,20 +29,19 @@ using Test
 end
 
 
-@testset "trotterize Strang produces symmetric K-1, K, K-1 layer structure" begin
+@testset "trotterize Strang produces symmetric 2K-1 layer structure" begin
     P = ComplexSpace(2)
     h = let m = randn(ComplexF64, P ⊗ P, P ⊗ P); (m + m') / 2 end
 
-    # Path graph → 2 classes → expected layer count 1 + 1 + 1 = 3.
-    es_path = [UndirectedEdge(src(e), dst(e)) for e in edges(path_graph(6))]
-    bond_hams = Dict(e => h for e in es_path)
-    circ = trotterize(bond_hams, 0.05, Strang())
-    @test circ isa Circuit
-    @test length(circ.gatelist) == 3
-
-    # Odd cycle → 3 classes → expected layer count 2 + 1 + 2 = 5.
-    es_odd = [UndirectedEdge(src(e), dst(e)) for e in edges(cycle_graph(5))]
-    bond_hams = Dict(e => h for e in es_odd)
-    circ = trotterize(bond_hams, 0.05, Strang())
-    @test length(circ.gatelist) == 5
+    # `Dict` iteration order is hash-seed-dependent, which feeds into the
+    # greedy `edge_coloring` and changes the resulting K. Assert the
+    # structural relation `length(gatelist) == 2K - 1` against the actual K.
+    for g in (path_graph(6), cycle_graph(5))
+        es = [UndirectedEdge(src(e), dst(e)) for e in edges(g)]
+        bond_hams = Dict(e => h for e in es)
+        K = length(edge_coloring(keys(bond_hams)))
+        circ = trotterize(bond_hams, 0.05, Strang())
+        @test circ isa Circuit
+        @test length(circ.gatelist) == 2K - 1
+    end
 end
