@@ -150,19 +150,43 @@ end
 # against `T`'s domain leg at slot `k` and the factor's codomain takes its
 # place. Legs not listed pass through unchanged, so the result has the same
 # `TensorMap` space as `T`.
-function _absorb_legs(T, leg_factors)
-    N = numind(T)
-    tensors = Any[T]
-    T_idx = Int[-i for i in 1:N]
-    indices = Vector{Int}[T_idx]
-    next_label = 0
+#
+# Implemented as a chain of single-leg `tensorcontract` calls without
+# restoring the canonical leg order between iterations: each step appends
+# `L`'s codomain to the tail and shifts surviving legs down, with `pos`
+# tracking the current position of every original leg; a single `permute`
+# at the end restores the original layout.
+function _absorb_legs(T::TensorMap{Tn, S, 1, N, A}, leg_factors) where {Tn, S, N, A}
+    pos = collect(1:(N + 1))
+    out = T
     for (k, L) in leg_factors
-        T_idx[k + 1] = (next_label += 1)
-        push!(tensors, L)
-        push!(indices, [-(k + 1), T_idx[k + 1]])
+        out = _absorb_one_leg!(pos, out, k + 1, L)
     end
-    raw = ncon(tensors, indices)
-    return permute(raw, ((1,), ntuple(i -> i + 1, N - 1)))
+    return permute(out, ((1,), ntuple(j -> pos[j + 1], N)))
+end
+
+# Contract `L` on the current position of original leg `target_orig` of
+# `out` and update `pos` in place. The result keeps the
+# `TensorMap{Tn, S, 1, N, A}` shape: `L`'s codomain lands at the tail
+# (position `N+1`) and the other legs slide one slot to the left.
+function _absorb_one_leg!(
+        pos::Vector{Int}, out::TensorMap{Tn, S, 1, N, A}, target_orig::Int, L,
+    ) where {Tn, S, N, A}
+    N1 = N + 1
+    target_curr = pos[target_orig]
+    open_idx = TupleTools.deleteat(ntuple(identity, N1), target_curr)
+    pA = (open_idx, (target_curr,))
+    pB = ((2,), (1,))
+    pAB = ((1,), ntuple(i -> i + 1, N))
+    new_out = tensorcontract(out, pA, false, L, pB, false, pAB)
+    @inbounds for i in 1:N1
+        if i == target_orig
+            pos[i] = N1
+        elseif pos[i] > target_curr
+            pos[i] -= 1
+        end
+    end
+    return new_out
 end
 
 """

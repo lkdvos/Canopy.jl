@@ -15,6 +15,7 @@ using AlgorithmsInterface: StopAfter
 
 using TensorKit
 using TensorKit: TupleTools
+using TensorKit.TO: tensorcontract
 using MatrixAlgebraKit: diagview, eigh_full, eigh_vals!, qr_compact, svd_trunc, svd_vals!, truncrank, trunctol
 using TimerOutputs: TimerOutput, @timeit
 using VectorInterface
