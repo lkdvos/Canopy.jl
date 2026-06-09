@@ -3,6 +3,8 @@ module Canopy
 export physicalspace, virtualspace
 export reduced_density_matrix
 export TensorNetworkState, BPMessages
+export BPSchedule, SynchronousSchedule, SpanningTreeSchedule, ResidualSchedule
+export BPSampler, GreedySampler, WeightedSampler
 
 using Dictionaries
 using Graphs: Graphs
@@ -25,6 +27,7 @@ include("edges.jl")
 include("states.jl")
 include("utility.jl")
 include("messages.jl")
+include("beliefpropagation.jl")
 
 include("expect.jl")
 export expect

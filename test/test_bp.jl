@@ -1,9 +1,15 @@
 using Canopy
 using Canopy: DirectedEdge, belief_propagation, check_consistency, tr_distance
+using Canopy: SpanningTreeSchedule, ResidualSchedule, GreedySampler, WeightedSampler
+using Canopy: random_spanning_tree
 using TensorKit
 using Graphs
 using Random
 using Test
+
+# Largest trace distance between corresponding messages of two `BPMessages`.
+max_msg_distance(a, b) =
+    maximum(de -> tr_distance(a[de], b[de]; is_hermitian = true), keys(a.messages))
 
 
 @testset "Identity-initialized messages are consistent" begin
@@ -68,4 +74,47 @@ end
     bad_de = first(keys(msgs.messages))
     msgs.messages[bad_de] = TensorKit.id(ComplexSpace(99))
     @test !check_consistency(state, msgs)
+end
+
+
+@testset "random_spanning_tree is a valid spanning tree" begin
+    Random.seed!(6)
+    for graph in (path_graph(6), cycle_graph(8), grid([3, 3]))
+        state = TensorNetworkState{ComplexF64}(undef, graph, ComplexSpace(2), ComplexSpace(3))
+        randn!(state)
+        nv = length(vertices(state))
+        ne = length(edges(state))
+        order, parent, cotree = random_spanning_tree(state, MersenneTwister(0))
+        @test sort(collect(order)) == sort(collect(vertices(state)))  # spans every vertex
+        @test length(parent) == nv - 1                                # tree has |V|-1 edges
+        @test length(parent) + length(cotree) == ne                   # tree ⊔ cotree = all edges
+    end
+end
+
+
+# All schedules solve the same fixed-point equations, so from the identity start
+# they should converge to the same messages (up to per-edge scale, which
+# `tr_distance` quotients out) as the synchronous default.
+@testset "BP schedules agree with the synchronous fixed point" begin
+    schedules(ndir) = (
+        "spanning_tree" => SpanningTreeSchedule(; rng = MersenneTwister(0)),
+        "residual_full" => ResidualSchedule(GreedySampler(ndir)),
+        "residual_half" => ResidualSchedule(GreedySampler(cld(ndir, 2))),
+        "residual_weighted" => ResidualSchedule(WeightedSampler(ndir; rng = MersenneTwister(0))),
+    )
+    @testset "$name graph" for (name, graph) in
+            ("ring" => cycle_graph(8), "tree" => path_graph(6), "grid" => grid([3, 3]))
+        Random.seed!(7)
+        state = TensorNetworkState{ComplexF64}(undef, graph, ComplexSpace(2), ComplexSpace(3))
+        randn!(state)
+        ndir = length(BPMessages(state).messages)
+        ref = belief_propagation(BPMessages(state), state; maxiter = 500, tol = 1.0e-12)
+        @testset "$sname" for (sname, sched) in schedules(ndir)
+            msgs = belief_propagation(
+                BPMessages(state), state; maxiter = 5000, tol = 1.0e-11, schedule = sched,
+            )
+            @test check_consistency(state, msgs)
+            @test max_msg_distance(msgs, ref) < 1.0e-6
+        end
+    end
 end
