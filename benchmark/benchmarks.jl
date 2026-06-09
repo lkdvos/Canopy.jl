@@ -13,8 +13,9 @@
 #
 # Suite groups:
 #   SUITE["message"]     — single-edge `compute_message` cost
-#   SUITE["sweep"]       — single `AI.step!` cost (one full BP iteration)
-#   SUITE["convergence"] — `belief_propagation` at fixed `maxiter`
+#   SUITE["sweep"]       — single `AI.step!` cost, per update schedule
+#   SUITE["convergence"] — `belief_propagation` at fixed `maxiter`, per schedule
+#   SUITE["schedule"]    — `belief_propagation` to fixed `tol`, per schedule
 
 using BenchmarkTools
 using Canopy
@@ -26,7 +27,9 @@ const SUITE = BenchmarkGroup()
 SUITE["message"] = BenchmarkGroup()
 SUITE["sweep"] = BenchmarkGroup()
 SUITE["convergence"] = BenchmarkGroup()
+SUITE["schedule"] = BenchmarkGroup()
 
 include("bench_message.jl")
 include("bench_sweep.jl")
 include("bench_convergence.jl")
+include("bench_schedule.jl")

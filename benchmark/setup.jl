@@ -5,6 +5,7 @@
 # (see `benchmarks.jl`).
 
 using Canopy: TensorNetworkState, BPMessages, belief_propagation, UndirectedEdge
+using Canopy: SynchronousSchedule, SpanningTreeSchedule, ResidualSchedule, GreedySampler
 using TensorKit: ComplexSpace
 using Graphs: cycle_graph, grid, edges, src, dst
 using Dictionaries: Dictionary
@@ -39,10 +40,22 @@ end
 # Build the `(problem, alg, bp_state)` triple needed to call `AI.step!`
 # directly, avoiding `belief_propagation`'s solve scaffolding inside the
 # timing loop. Stopping criterion is `StopAfterIteration(1)` so a single
-# `step!` represents one full sweep.
-function bp_kernel_setup(state)
+# `step!` represents one full sweep. `schedule` selects the message-update
+# order benchmarked.
+function bp_kernel_setup(state; schedule = SynchronousSchedule())
     problem = Canopy.BPProblem(state)
-    alg = Canopy.BeliefPropagation(AI.StopAfterIteration(1))
+    alg = Canopy.BeliefPropagation(AI.StopAfterIteration(1); schedule = schedule)
     bp_state = AI.initialize_state(problem, alg; messages = BPMessages(state))
     return problem, alg, bp_state
 end
+
+# The message-update schedules compared across the suite. Random schedules use a
+# fixed-seed RNG so benchmark runs are reproducible. `ndirected(state)` is the
+# total number of directed edges = a full-sweep batch size for the residual
+# schedule.
+ndirected(state) = length(BPMessages(state).messages)
+const BENCH_SCHEDULES = (
+    :sync => SynchronousSchedule(),
+    :tree => SpanningTreeSchedule(; rng = MersenneTwister(0)),
+    :residual => ResidualSchedule(GreedySampler(8)),
+)
