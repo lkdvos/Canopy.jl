@@ -104,15 +104,18 @@ end
 
 # BP Algorithm
 # ------------
-struct BeliefPropagation{Sched <: BPSchedule, S <: AI.StoppingCriterion, TO} <: AI.Algorithm
+struct BeliefPropagation{Sched <: BPSchedule, S <: AI.StoppingCriterion, TO, B, A} <: AI.Algorithm
     schedule::Sched
     stopping_criterion::S
     timer::TO
+    backend::B
+    allocator::A
 end
 BeliefPropagation(
         stopping_criterion::AI.StoppingCriterion;
         schedule::BPSchedule = SynchronousSchedule(), timer = nothing,
-    ) = BeliefPropagation(schedule, stopping_criterion, timer)
+        backend = DefaultBackend(), allocator = _default_allocator(),
+    ) = BeliefPropagation(schedule, stopping_criterion, timer, backend, allocator)
 
 struct BPProblem{N} <: AI.Problem
     network::N
@@ -157,9 +160,11 @@ end
 
 # Recompute the message along `edge` (normalized, hermitian-projected), store it
 # back into `msgs` in place, and return the trace distance to the old message.
-function update_message!(msgs::BPMessages, network, edge::DirectedEdge; timer = nothing)
+function update_message!(
+        msgs::BPMessages, network, edge::DirectedEdge, backend, allocator; timer = nothing,
+    )
     new_msg = @maybe_timeit timer "compute_message" begin
-        normalize!(project_hermitian!(compute_message(msgs, network, edge)))
+        normalize!(project_hermitian!(compute_message(msgs, network, edge, backend, allocator)))
     end
     res = tr_distance(msgs[edge], new_msg; is_hermitian = true)
     msgs.messages[edge] = new_msg
@@ -175,7 +180,7 @@ function update_messages!(
     new_dict = Dictionary{keytype(old.messages), eltype(old)}()
     for edge in keys(old.messages)
         new_msg = @maybe_timeit alg.timer "compute_message" begin
-            normalize!(project_hermitian!(compute_message(old, problem.network, edge)))
+            normalize!(project_hermitian!(compute_message(old, problem.network, edge, alg.backend, alg.allocator)))
         end
         insert!(new_dict, edge, new_msg)
         state.residuals[edge] = tr_distance(old[edge], new_msg; is_hermitian = true)
@@ -225,20 +230,20 @@ function update_messages!(
     for v in Iterators.reverse(order)
         haskey(parent, v) || continue
         e = DirectedEdge(v, parent[v])
-        state.residuals[e] = update_message!(msgs, network, e; timer = alg.timer)
+        state.residuals[e] = update_message!(msgs, network, e, alg.backend, alg.allocator; timer = alg.timer)
     end
     # outward pass: root → leaves
     for v in order
         haskey(parent, v) || continue
         e = DirectedEdge(parent[v], v)
-        state.residuals[e] = update_message!(msgs, network, e; timer = alg.timer)
+        state.residuals[e] = update_message!(msgs, network, e, alg.backend, alg.allocator; timer = alg.timer)
     end
     # cotree (loop-closing) edges: both directions
     for ce in cotree
         e_fwd = DirectedEdge(ce)
-        state.residuals[e_fwd] = update_message!(msgs, network, e_fwd; timer = alg.timer)
+        state.residuals[e_fwd] = update_message!(msgs, network, e_fwd, alg.backend, alg.allocator; timer = alg.timer)
         e_bwd = reverse(e_fwd)
-        state.residuals[e_bwd] = update_message!(msgs, network, e_bwd; timer = alg.timer)
+        state.residuals[e_bwd] = update_message!(msgs, network, e_bwd, alg.backend, alg.allocator; timer = alg.timer)
     end
     return state
 end
@@ -287,7 +292,7 @@ function update_messages!(
     # each edge's change, then apply together.
     updates = map(batch) do e
         new_msg = @maybe_timeit alg.timer "compute_message" begin
-            normalize!(project_hermitian!(compute_message(msgs, network, e)))
+            normalize!(project_hermitian!(compute_message(msgs, network, e, alg.backend, alg.allocator)))
         end
         return (e, new_msg, tr_distance(msgs[e], new_msg; is_hermitian = true))
     end
@@ -305,11 +310,11 @@ end
 function belief_propagation(
         messages::BPMessages, state::TensorNetworkState;
         maxiter::Int, tol::Real = 0, schedule::BPSchedule = SynchronousSchedule(),
-        timer = nothing,
+        timer = nothing, backend = DefaultBackend(), allocator = _default_allocator(),
     )
     stopping = AI.StopAfterIteration(maxiter)
     tol > 0 && (stopping = stopping | StopWhenStable(tol))
-    alg = BeliefPropagation(stopping; schedule, timer)
+    alg = BeliefPropagation(stopping; schedule, timer, backend, allocator)
     return @maybe_timeit timer "belief_propagation" begin
         AI.solve(BPProblem(state), alg; messages)
     end

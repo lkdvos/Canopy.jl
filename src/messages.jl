@@ -146,47 +146,44 @@ end
 # ---------------
 
 # Shared primitive: absorb a `V_k ← V_k` factor on selected domain legs of
-# `T`. For each `(k, factor)` in `leg_factors`, the factor's domain contracts
-# against `T`'s domain leg at slot `k` and the factor's codomain takes its
-# place. Legs not listed pass through unchanged, so the result has the same
-# `TensorMap` space as `T`.
+# `T`. For each `(k, L)` in `leg_factors`, `L`'s domain contracts against `T`'s
+# domain leg at slot `k` and `L`'s codomain takes its place. Legs not listed
+# pass through unchanged, so the result has the same `TensorMap` space as `T`
+# (up to a leg duality that a factor may flip).
 #
-# Implemented as a chain of single-leg `tensorcontract` calls without
-# restoring the canonical leg order between iterations: each step appends
-# `L`'s codomain to the tail and shifts surviving legs down, with `pos`
-# tracking the current position of every original leg; a single `permute`
-# at the end restores the original layout.
-function _absorb_legs(T::TensorMap{Tn, S, 1, N, A}, leg_factors) where {Tn, S, N, A}
-    pos = collect(1:(N + 1))
-    out = T
-    for (k, L) in leg_factors
-        out = _absorb_one_leg!(pos, out, k + 1, L)
-    end
-    return permute(out, ((1,), ntuple(j -> pos[j + 1], N)))
-end
-
-# Contract `L` on the current position of original leg `target_orig` of
-# `out` and update `pos` in place. The result keeps the
-# `TensorMap{Tn, S, 1, N, A}` shape: `L`'s codomain lands at the tail
-# (position `N+1`) and the other legs slide one slot to the left.
-function _absorb_one_leg!(
-        pos::Vector{Int}, out::TensorMap{Tn, S, 1, N, A}, target_orig::Int, L,
-    ) where {Tn, S, N, A}
+# Implemented as a chain of single-leg `tensorcontract!`s without restoring the
+# canonical leg order between iterations: each step appends `L`'s codomain to the
+# tail and shifts surviving legs down, with `pos` tracking the current position
+# of every original leg; a final `permute!` restores the layout.
+function _absorb_legs(T::TensorMap{Tn, S, 1, N, A}, leg_factors, backend, allocator) where {Tn, S, N, A}
     N1 = N + 1
-    target_curr = pos[target_orig]
-    open_idx = TupleTools.deleteat(ntuple(identity, N1), target_curr)
-    pA = (open_idx, (target_curr,))
-    pB = ((2,), (1,))
-    pAB = ((1,), ntuple(i -> i + 1, N))
-    new_out = tensorcontract(out, pA, false, L, pB, false, pAB)
-    @inbounds for i in 1:N1
-        if i == target_orig
-            pos[i] = N1
-        elseif pos[i] > target_curr
-            pos[i] -= 1
+    pos = collect(1:N1)
+    out = T
+    cp = allocator_checkpoint!(allocator)
+    for (k, L) in leg_factors
+        target_curr = pos[k + 1]
+        open_idx = TupleTools.deleteat(ntuple(identity, N1), target_curr)
+        pA = (open_idx, (target_curr,))
+        pB = ((2,), (1,))
+        pAB = ((1,), ntuple(i -> i + 1, N))
+        TC = promote_contract(scalartype(out), scalartype(L))
+        new_out = tensoralloc_contract(TC, out, pA, false, L, pB, false, pAB, Val(true), allocator)
+        tensorcontract!(new_out, out, pA, false, L, pB, false, pAB, One(), Zero(), backend, allocator)
+        @inbounds for i in 1:N1
+            if i == k + 1
+                pos[i] = N1
+            elseif pos[i] > target_curr
+                pos[i] -= 1
+            end
         end
+        out === T || tensorfree!(out, allocator)
+        out = new_out
     end
-    return new_out
+    perm = ((1,), ntuple(j -> pos[j + 1], N))
+    result = permute!(similar(T, permute(space(out), perm)), out, perm)
+    out === T || tensorfree!(out, allocator)
+    allocator_reset!(allocator, cp)
+    return result
 end
 
 """
@@ -208,13 +205,14 @@ listed in `edges` — including padded unit-space legs — pass through
 unchanged.
 """
 function attach_messages(
-        state::TensorNetworkState, msgs::BPMessages, site, edges
+        state::TensorNetworkState, msgs::BPMessages, site, edges,
+        backend = DefaultBackend(), allocator = _default_allocator(),
     )
     leg_factors = map(edges) do e
         last(e) == site || throw(ArgumentError(lazy"edge $e does not terminate at $site"))
         return (leg_index(state, reverse(e)), msgs[e])
     end
-    return _absorb_legs(state[site], leg_factors)::eltype(state)
+    return _absorb_legs(state[site], leg_factors, backend, allocator)::eltype(state)
 end
 
 """
@@ -224,8 +222,10 @@ Convenience wrapper for [`attach_messages`](@ref): absorbs *every* incoming
 BP message at `site` into the corresponding virtual leg of `state[site]`.
 Equivalent to `attach_messages(state, msgs, site, incoming_edges(state, site))`.
 """
-attach_all_messages(state::TensorNetworkState, msgs::BPMessages, site) =
-    attach_messages(state, msgs, site, incoming_edges(state, site))
+attach_all_messages(
+    state::TensorNetworkState, msgs::BPMessages, site,
+    backend = DefaultBackend(), allocator = _default_allocator(),
+) = attach_messages(state, msgs, site, incoming_edges(state, site), backend, allocator)
 
 """
     compute_message(msgs, state, edge::DirectedEdge) -> MessageTensor
@@ -244,24 +244,35 @@ mutates `msgs`, and neither performs trace normalization — callers (e.g.
 [`BeliefPropagation`](@ref)) are expected to normalise the returned
 message.
 """
-compute_message(msgs::BPMessages, state::TensorNetworkState, edge::DirectedEdge) =
-    compute_message!(similar(msgs[edge]), msgs, state, edge)
+compute_message(
+    msgs::BPMessages, state::TensorNetworkState, edge::DirectedEdge,
+    backend = DefaultBackend(), allocator = _default_allocator(),
+) = compute_message!(similar(msgs[edge]), msgs, state, edge, backend, allocator)
 
-function compute_message!(msg, msgs::BPMessages, state::TensorNetworkState, edge::DirectedEdge)
+function compute_message!(
+        msg, msgs::BPMessages, state::TensorNetworkState, edge::DirectedEdge,
+        backend = DefaultBackend(), allocator = _default_allocator(),
+    )
     site = first(edge)
     target = leg_index(state, edge)
     T = state[site]
     N = numind(T)
 
-    Tm = attach_messages(state, msgs, site, incoming_edges(state, site; exclude=(last(edge),)))
+    Tm = attach_messages(
+        state, msgs, site, incoming_edges(state, site; exclude = (last(edge),)),
+        backend, allocator,
+    )
 
+    # TODO: `ncon` currently does not provide allocator checkpointing
+    cp = allocator_checkpoint!(allocator)
     Tm_idx = replace(1:N, (target + 1) => -2)
     Td_idx = replace(vcat(2:N, [1]), (target + 1) => -1)
-
     tensors = Any[Tm, T']
     indices = Vector{Int}[Tm_idx, Td_idx]
+    repartition!(msg, ncon(tensors, indices; backend, allocator))
+    allocator_reset!(allocator, cp)
 
-    return repartition!(msg, ncon(tensors, indices))::typeof(msg)
+    return msg::typeof(msg)
 end
 
 """
