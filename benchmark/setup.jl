@@ -7,11 +7,21 @@
 using Canopy: TensorNetworkState, BPMessages, belief_propagation, UndirectedEdge
 using Canopy: SynchronousSchedule, SpanningTreeSchedule, ResidualSchedule, GreedySampler
 using TensorKit: ComplexSpace
+using TensorKit: TO
 using Graphs: cycle_graph, grid, edges, src, dst
 using Dictionaries: Dictionary
 using Random
+import Bumper
 
 Random.seed!(0)
+
+# Allocators compared by the allocator benchmark group: plain heap allocation
+# versus the production Bumper `ResizeBuffer`, which warms up to the peak
+# intermediate size and reclaims temporaries across repeated contractions.
+const BENCH_ALLOCATORS = (
+    :default => TO.DefaultAllocator(),
+    :bumper => Bumper.default_buffer(Bumper.ResizeBuffer),
+)
 
 function ring_state(L::Int, Dmax::Int; T::Type = ComplexF64, S::Type = ComplexSpace)
     g = cycle_graph(L)
@@ -42,9 +52,9 @@ end
 # timing loop. Stopping criterion is `StopAfterIteration(1)` so a single
 # `step!` represents one full sweep. `schedule` selects the message-update
 # order benchmarked.
-function bp_kernel_setup(state; schedule = SynchronousSchedule())
+function bp_kernel_setup(state; schedule = SynchronousSchedule(), allocator = Bumper.default_buffer(Bumper.ResizeBuffer))
     problem = Canopy.BPProblem(state)
-    alg = Canopy.BeliefPropagation(AI.StopAfterIteration(1); schedule = schedule)
+    alg = Canopy.BeliefPropagation(AI.StopAfterIteration(1); schedule = schedule, allocator = allocator)
     bp_state = AI.initialize_state(problem, alg; messages = BPMessages(state))
     return problem, alg, bp_state
 end

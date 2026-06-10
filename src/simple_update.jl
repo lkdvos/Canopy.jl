@@ -2,11 +2,19 @@
 function apply!(
         state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 2};
         trunc = notrunc(), gauge_tol::Real = 0.0, normp::Real = 2, timer = nothing,
+        backend = DefaultBackend(), allocator = _default_allocator(),
     )
     return @maybe_timeit timer "apply! 2-site" begin
         _check_compatible(state, gate)
         s₁, s₂ = gate.sites
         G = gate.tensor
+
+        # The buffer-allocating steps below are each self-contained: `_absorb_legs`
+        # (gauge in / reconstruct) frees its temporaries and resets the buffer, and
+        # the `@tensor` gate contraction does the same automatically. The new site
+        # tensors and bond messages are heap-allocated and escape. The
+        # MatrixAlgebraKit factorizations (`qr_compact!`, `svd_trunc!`, `eigh_full`)
+        # do not use this allocator and always allocate on the heap.
 
         # Canonical orientation: smaller vertex on the codomain side of the SVD.
         if s₁ > s₂
@@ -21,9 +29,9 @@ function apply!(
         # Absorb square root factors and factorize
         T₁, T₂, gauge₁, gauge₂ = @maybe_timeit timer "gauge in" begin
             g₁ = _gauge_factors(state, msgs, DirectedEdge(s₁, s₂); tol = gauge_tol)
-            t₁ = _absorb_legs(state[s₁], (k => L for (k, L, _) in g₁))
+            t₁ = _absorb_legs(state[s₁], (k => L for (k, L, _) in g₁), backend, allocator)
             g₂ = _gauge_factors(state, msgs, DirectedEdge(s₂, s₁); tol = gauge_tol)
-            t₂ = _absorb_legs(state[s₂], (k => L for (k, L, _) in g₂))
+            t₂ = _absorb_legs(state[s₂], (k => L for (k, L, _) in g₂), backend, allocator)
             (t₁, t₂, g₁, g₂)
         end
 
@@ -36,7 +44,7 @@ function apply!(
 
         # Apply gate and factorize
         U, Σ, Vᴴ, ϵ = @maybe_timeit timer "gate+SVD" begin
-            @tensor θ[-1 -2; -3 -4] := R₁[-1; 1 2] * R₂[-3; 3 2] * G[-2 -4; 1 3]
+            @tensor backend = backend allocator = allocator θ[-1 -2; -3 -4] := R₁[-1; 1 2] * R₂[-3; 3 2] * G[-2 -4; 1 3]
             svd_trunc!(θ; trunc)
         end
 
@@ -61,12 +69,12 @@ function apply!(
                 Q₁ * permute(U, ((1,), (2, 3))),
                 ((Nd,), TupleTools.insertafter(outer, k₁ - 1, (Nd + 1,))),
             )
-            state.vertices[s₁] = _absorb_legs(T₁, (k => Linv for (k, _, Linv) in gauge₁))
+            state.vertices[s₁] = _absorb_legs(T₁, (k => Linv for (k, _, Linv) in gauge₁), backend, allocator)
             T₂ = permute(
                 Q₂ * permute(Vᴴ, ((2,), (1, 3))),
                 ((Nd + 1,), TupleTools.insertafter(outer, k₂ - 1, (Nd,))),
             )
-            state.vertices[s₂] = _absorb_legs(T₂, (k => Linv for (k, _, Linv) in gauge₂))
+            state.vertices[s₂] = _absorb_legs(T₂, (k => Linv for (k, _, Linv) in gauge₂), backend, allocator)
         end
 
         # Bond messages from the new Schmidt diagonal
