@@ -16,6 +16,7 @@
 #   SUITE["sweep"]       — single `AI.step!` cost, per update schedule
 #   SUITE["convergence"] — `belief_propagation` at fixed `maxiter`, per schedule
 #   SUITE["schedule"]    — `belief_propagation` to fixed `tol`, per schedule
+#   SUITE["allocator"]   — default vs Bumper allocator (time & allocations)
 
 using BenchmarkTools
 using Canopy
@@ -28,8 +29,10 @@ SUITE["message"] = BenchmarkGroup()
 SUITE["sweep"] = BenchmarkGroup()
 SUITE["convergence"] = BenchmarkGroup()
 SUITE["schedule"] = BenchmarkGroup()
+SUITE["allocator"] = BenchmarkGroup()
 
 include("bench_message.jl")
 include("bench_sweep.jl")
 include("bench_convergence.jl")
 include("bench_schedule.jl")
+include("bench_allocator.jl")

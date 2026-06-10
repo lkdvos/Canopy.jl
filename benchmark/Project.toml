@@ -1,6 +1,7 @@
 [deps]
 AlgorithmsInterface = "d1e3940c-cd12-4505-8585-b0a4b322527d"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+Bumper = "8ce10254-0962-460f-a3d8-1f77fea1446e"
 Canopy = "98ee57e9-4953-4dfe-8aed-2a71ed84f5ba"
 Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
 Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
@@ -10,6 +11,7 @@ TensorKit = "07d1fe3e-3e46-537d-9eac-e9e13d0d4cec"
 [compat]
 AlgorithmsInterface = "0.1"
 BenchmarkTools = "1"
+Bumper = "0.7"
 Dictionaries = "0.4"
 Graphs = "1"
 TensorKit = "0.16"
