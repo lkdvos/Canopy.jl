@@ -1,13 +1,25 @@
-# Imaginary-time evolution of the 1D transverse-field Ising model
-#
-#     H = -J Σ_⟨ij⟩ σz_i σz_j - h Σ_i σx_i
-#
-# on a ring (cycle graph, PBC), via simple-update on top of belief-propagation
-# messages. Sweeps h, computes ground-state energy per site E/L and transverse
-# magnetization ⟨σx⟩, and compares against the exact Jordan–Wigner solution at
-# the same finite L.
-#
-# Run:  julia --project=examples examples/tfim_chain_ring.jl
+using Markdown #hide
+
+md"""
+# Transverse-field Ising model on a ring
+
+Imaginary-time evolution of the 1D transverse-field Ising model,
+
+```math
+H = -J \sum_{\langle ij \rangle} \sigma^z_i \sigma^z_j - h \sum_i \sigma^x_i,
+```
+
+on a ring (cycle graph, PBC), via simple update on top of belief-propagation messages. We
+sweep $h$, compute the ground-state energy per site $E/L$ and the transverse magnetization
+$\langle \sigma^x \rangle$, and compare against the exact Jordan–Wigner solution at the same
+finite $L$.
+
+This example can be run from the command line with:
+
+```
+julia --project=examples examples/tfim_chain_ring/main.jl
+```
+"""
 
 using Canopy: TensorNetworkState, BPMessages, belief_propagation,
               UndirectedEdge, LocalGate, apply!, reduced_density_matrix, expect,
@@ -22,10 +34,14 @@ using Statistics: mean
 using Printf
 using CairoMakie
 
-# --- Jordan-Wigner reference --------------------------------------------------
-# Finite-L, even-parity (ground-state) sector of the TFIM ring at J=1:
-# antiperiodic momenta k_n = (2n-1)π/L, single-particle dispersion
-# ε(k) = 2√(J² + h² - 2Jh cos k), ground-state energy E₀ = -½ Σ_k ε(k).
+md"""
+## Jordan–Wigner reference
+
+In the finite-$L$, even-parity (ground-state) sector of the TFIM ring at $J = 1$, the
+antiperiodic momenta are $k_n = (2n-1)\pi/L$ with single-particle dispersion
+$\varepsilon(k) = 2\sqrt{J^2 + h^2 - 2 J h \cos k}$ and ground-state energy
+$E_0 = -\tfrac{1}{2} \sum_k \varepsilon(k)$.
+"""
 
 _ε(J, h, k) = sqrt(J^2 + h^2 - 2J*h*cos(k))
 
@@ -37,7 +53,9 @@ function jw_mx_per_site(L::Int, h::Real; J::Real=1.0)
     return (1/L) * sum((h - J*cos((2n-1)*π/L)) / _ε(J, h, (2n-1)*π/L) for n in 1:L)
 end
 
-# --- random ring state --------------------------------------------------------
+md"""
+## Random ring state
+"""
 
 function ring_state(L::Int, Dmax::Int; T::Type=ComplexF64, S::Type=ComplexSpace)
     g = cycle_graph(L)
@@ -50,10 +68,17 @@ function ring_state(L::Int, Dmax::Int; T::Type=ComplexF64, S::Type=ComplexSpace)
     return st, ekeys
 end
 
-# --- TFIM bond operators ------------------------------------------------------
-# Bond Hamiltonian distributed across edges as
-#   h_e = -J σz⊗σz - (h/deg(u)) σx⊗I - (h/deg(v)) I⊗σx
-# so Σ_e h_e = H exactly. For a ring every vertex has degree 2.
+md"""
+## TFIM bond operators
+
+We distribute the bond Hamiltonian across edges as
+
+```math
+h_e = -J\, \sigma^z \otimes \sigma^z - \frac{h}{\deg(u)}\, \sigma^x \otimes I - \frac{h}{\deg(v)}\, I \otimes \sigma^x,
+```
+
+so that $\sum_e h_e = H$ exactly. For a ring every vertex has degree 2.
+"""
 
 function tfim_bond_hamiltonian(J::Real, h::Real, deg_u::Int, deg_v::Int; T::Type=ComplexF64)
     sx, sz = σˣ(T), σᶻ(T)
@@ -61,7 +86,12 @@ function tfim_bond_hamiltonian(J::Real, h::Real, deg_u::Int, deg_v::Int; T::Type
     return -J*(sz ⊗ sz) - (h/deg_u)*(sx ⊗ iI) - (h/deg_v)*(iI ⊗ sx)
 end
 
-# --- run a single (L, h, Dmax) point ------------------------------------------
+md"""
+## Running a single (L, h, Dmax) point
+
+Each point is evolved with a Strang-split Trotter circuit over a decreasing-`dτ` schedule,
+re-converging the BP messages after every sweep.
+"""
 
 const SCHEDULE = ((0.1, 60), (0.01, 60), (0.001, 40))
 
@@ -91,7 +121,13 @@ function run_one(L::Int, h::Real, Dmax::Int; J::Real=1.0, seed::UInt=hash((L, h,
     return E / L, mx
 end
 
-# --- scan + plot --------------------------------------------------------------
+md"""
+## Scan and plot
+
+Sweep $h$, run the simple-update point at each value, and overlay the result on the exact
+Jordan–Wigner curves for the energy per site and the transverse magnetization. The dashed
+line marks the $h/J = 1$ critical point.
+"""
 
 function main(; L::Int=16, Dmax::Int=8, hs=range(0.2, 1.8; length=9), J::Real=1.0)
     E_su = similar(hs, Float64); mx_su = similar(hs, Float64)

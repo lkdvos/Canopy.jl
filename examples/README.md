@@ -29,6 +29,19 @@ julia --project=examples examples/<name>/main.jl
 
 First-time precompilation (CairoMakie in particular) can take several minutes.
 
+## Authoring convention
+
+Examples follow the MPSKit/PEPSKit Literate style so the rendered pages typeset cleanly:
+
+- Start the file with `using Markdown #hide`.
+- Write prose in `md"""…"""` blocks (Literate is invoked with `mdstrings=true`). Use real
+  markdown headers (`# Title` once, then `## Section`), inline math `$…$`, and fenced
+  ` ```math ` blocks for displayed equations.
+- Keep code as plain Julia between the `md` blocks — a blank line is enough to separate them.
+- **Comments that must stay inside code (e.g. inside a function body) use `##` (double
+  hash).** A single-`#` full-line comment is parsed as prose and will split the surrounding
+  code chunk — inside a `for`/`function` this orphans the block and breaks the build.
+
 ## Available examples
 
 - `free_fermion_ring` — spinless free fermions on a 1D PBC ring via simple-update + BP

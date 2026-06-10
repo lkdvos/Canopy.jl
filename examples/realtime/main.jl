@@ -1,33 +1,43 @@
-# Real-time evolution of spinless free fermions on a finite honeycomb lattice
-#
-#     H = -Σ_⟨ij⟩ (c†_i c_j + h.c.) + μ Σ_i (±1)_i n_i        |ψ_t⟩ = exp(-iHt) |ψ₀⟩
-#
-# A quench from a product state in a staggered (sublattice-alternating) field,
-# evolved in real time by belief-propagation + bond truncation, benchmarked
-# against the exact single-particle solution. Reproduces panel (b) of
-# `FreeFermionBenchmark.pdf` (48-site hexagonal lattice): the central-bond
-# hopping ⟨C†_i C_j + h.c.⟩ vs time for BP bond dimensions χ ∈ {4, 8, 16, 32},
-# overlaid on the truncation-free reference.
-#
-# This is a Canopy port of `examples/realtime/example.jl` (which uses
-# TensorNetworkQuantumSimulator + NamedGraphs). Two representation notes:
-#
-#   * NamedGraphs labels honeycomb vertices `(i, j)` and the bipartite
-#     sublattice is `isodd(i+j)`; Canopy's `hexagonal_lattice` labels them
-#     `(i, j, s)` with the sublattice carried explicitly by `s ∈ {1, 2}`. The
-#     staggered field is therefore set per sublattice `s` here — the physical
-#     image of `example.jl`'s `isodd(sum(v))` field.
-#   * The initial-occupation rule `sum(v) % 4 == 0 ? empty : occupied` is ported
-#     literally; on 48 sites it leaves 36 occupied (¾-filled, even parity — the
-#     PDF's "quarter filling" counts the ¼ holes). Flip to `... ? occupied :
-#     empty` for literal ¼ occupation.
-#
-# Real time via the same first-order split as `example.jl`: each dt step applies
-# the on-site number layer, the hopping layer, then the on-site layer again. The
-# exact reference applies the identical circuit to the single-particle
-# correlation matrix, so it differs from the TN run only by bond truncation.
-#
-# Run:  julia --project=examples examples/realtime/main.jl
+using Markdown #hide
+
+md"""
+# Real-time evolution of free fermions
+
+Real-time evolution of spinless free fermions on a finite honeycomb lattice,
+
+```math
+H = -\sum_{\langle ij \rangle} \left( c^\dagger_i c_j + \text{h.c.} \right) + \mu \sum_i (\pm 1)_i\, n_i,
+\qquad |\psi_t\rangle = e^{-iHt} |\psi_0\rangle.
+```
+
+A quench from a product state in a staggered (sublattice-alternating) field, evolved in real
+time by belief propagation + bond truncation, benchmarked against the exact single-particle
+solution. This reproduces panel (b) of `FreeFermionBenchmark.pdf` (48-site hexagonal
+lattice): the central-bond hopping $\langle C^\dagger_i C_j + \text{h.c.} \rangle$ vs. time
+for BP bond dimensions $\chi \in \{4, 8, 16, 32\}$, overlaid on the truncation-free reference.
+
+This is a Canopy port of `examples/realtime/example.jl` (which uses
+TensorNetworkQuantumSimulator + NamedGraphs). Two representation notes:
+
+- NamedGraphs labels honeycomb vertices `(i, j)` and the bipartite sublattice is
+  `isodd(i+j)`; Canopy's `hexagonal_lattice` labels them `(i, j, s)` with the sublattice
+  carried explicitly by `s ∈ {1, 2}`. The staggered field is therefore set per sublattice
+  `s` here — the physical image of `example.jl`'s `isodd(sum(v))` field.
+- The initial-occupation rule `sum(v) % 4 == 0 ? empty : occupied` is ported literally; on
+  48 sites it leaves 36 occupied (¾-filled, even parity — the PDF's "quarter filling" counts
+  the ¼ holes). Flip to `... ? occupied : empty` for literal ¼ occupation.
+
+Real time uses the same first-order split as `example.jl`: each `dt` step applies the on-site
+number layer, the hopping layer, then the on-site layer again. The exact reference applies the
+identical circuit to the single-particle correlation matrix, so it differs from the TN run
+only by bond truncation.
+
+This example can be run from the command line with:
+
+```
+julia --project=examples examples/realtime/main.jl
+```
+"""
 
 using Canopy: hexagonal_lattice, product_state, BPMessages, belief_propagation,
     UndirectedEdge, LocalGate, CompositeGate, Circuit, apply!, edge_coloring,
@@ -41,15 +51,18 @@ using Printf
 using TimerOutputs
 using CairoMakie
 
-# --- model / run parameters ---------------------------------------------------
+md"""
+## Model and run parameters
+
+The defaults run in a few minutes and already show BP tracking the exact curve through the
+first oscillations. For the full `FreeFermionBenchmark.pdf` panel (b) x-axis, set
+`T_FINAL = 5.0` (≈ 10× longer; cost ≈ `length(CHIS) · NSTEPS · BP`).
+"""
 
 const M, N = 4, 6              # m × n unit cells → 2·m·n = 48 sites
 const T_HOP = -1.0             # hopping coefficient t  (H = -Σ c†c + h.c. + …)
 const MU = 1.0                # staggered-field amplitude
 const DT = 0.01
-# These defaults run in a few minutes and already show BP tracking the exact
-# curve through the first oscillations. For the full FreeFermionBenchmark.pdf
-# panel (b) x-axis, set T_FINAL = 5.0 (≈ 10× longer; cost ≈ length(CHIS)·NSTEPS·BP).
 const T_FINAL = 5.0
 const NSTEPS = round(Int, T_FINAL / DT)
 const CHIS = (4, 8, 16, 32)
@@ -59,14 +72,21 @@ const ES = hexagonal_lattice(M, N)                       # open-boundary honeyco
 const VERTS = sort(unique(Iterators.flatten((e.src, e.dst) for e in ES)))
 const HOPOP = f_hopping(ComplexF64, Trivial)             # c†_i c_j + c†_j c_i
 
-# staggered ±μ field, alternating on the two sublattices (s = 1 → +μ, s = 2 → -μ)
+md"""
+The staggered $\pm\mu$ field alternates on the two sublattices ($s = 1 \to +\mu$,
+$s = 2 \to -\mu$), and the initial occupation is empty iff `sum(v) % 4 == 0` (the
+`example.jl` rule):
+"""
+
 μ_of(v) = isodd(v[3]) ? MU : -MU
-# initial occupation: empty iff sum(v) % 4 == 0 (example.jl rule)
 occ_of(v) = (sum(v) % 4 == 0) ? 0 : 1
 
-# measured bond: the occupied/empty-straddling edge nearest the lattice centre.
-# Coherence ⟨C†C⟩ only builds on a bond whose two sites start with *different*
-# occupation, so a bond inside a uniformly-filled region would stay ≈ 0.
+md"""
+We measure on the occupied/empty-straddling edge nearest the lattice centre. Coherence
+$\langle C^\dagger C \rangle$ only builds on a bond whose two sites start with *different*
+occupation, so a bond inside a uniformly-filled region would stay $\approx 0$.
+"""
+
 const _CENTER = ((M + 1) / 2, (N + 1) / 2)
 const BOND = argmin(
     e -> sum(abs2, ((e.src[1], e.src[2]) .+ (e.dst[1], e.dst[2])) ./ 2 .- _CENTER),
@@ -74,7 +94,9 @@ const BOND = argmin(
 )
 const VC, VN = BOND.src, BOND.dst
 
-# --- initial product state ----------------------------------------------------
+md"""
+## Initial product state
+"""
 
 function initial_state()
     P = fermion_space(Trivial)
@@ -83,7 +105,11 @@ function initial_state()
     return product_state(ComplexF64, ES, ps, ls)
 end
 
-# --- Trotter layers (one dt step = single-site, hopping, single-site) ---------
+md"""
+## Trotter layers
+
+One `dt` step is single-site, hopping, single-site.
+"""
 
 function build_layers()
     n = f_num(ComplexF64, Trivial)
@@ -98,7 +124,9 @@ function build_layers()
     return single, hop
 end
 
-# --- single (n₁ × n₂, χ) real-time trajectory --------------------------------
+md"""
+## Single-χ real-time trajectory
+"""
 
 function run_chi(χ; verbose=true)
     state = initial_state()
@@ -118,8 +146,8 @@ function run_chi(χ; verbose=true)
         state, msgs, _ = apply!(state, msgs, hop; trunc, timer=to)
         state, msgs, _ = apply!(state, msgs, single; timer=to)
         t2 = time()
-        # each dt step perturbs the state only slightly, so BP reconverges quickly
-        # from the previous messages — the tol lets it stop early.
+        ## each dt step perturbs the state only slightly, so BP reconverges quickly
+        ## from the previous messages — the tol lets it stop early.
         msgs = belief_propagation(msgs, state; maxiter=BP_ITERS, tol=1e-10, timer=to)
         t3 = time()
         t_gate += t2 - t1
@@ -136,9 +164,14 @@ function run_chi(χ; verbose=true)
     return traj, to
 end
 
-# --- exact single-particle reference (truncation-free, same circuit) ---------
-# C[i,j] = ⟨c†_i c_j⟩ evolves as C → conj(u) C transpose(u) under each gate's
-# single-particle unitary u, applied in the same order as the TN circuit.
+md"""
+## Exact single-particle reference
+
+The truncation-free reference uses the same circuit:
+$C[i,j] = \langle c^\dagger_i c_j \rangle$ evolves as
+$C \to \overline{u}\, C\, u^{\mathsf{T}}$ under each gate's single-particle unitary $u$,
+applied in the same order as the TN circuit.
+"""
 
 apply_one_mode!(C, a, ph) = (@views(C[a, :] .*= conj(ph)); @views(C[:, a] .*= ph); C)
 function apply_two_mode!(C, a, b, w)
@@ -175,7 +208,12 @@ function exact_traj()
     return traj
 end
 
-# --- run sweep + plot ---------------------------------------------------------
+md"""
+## Run sweep and plot
+
+Run the exact reference and the BP trajectory at each $\chi$, then plot the central-bond
+hopping vs. time alongside the absolute error from the exact curve.
+"""
 
 function main()
     println("Real-time free-fermion quench on a $(2 * M * N)-site hexagonal lattice (Canopy.jl)")

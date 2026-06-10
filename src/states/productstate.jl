@@ -19,9 +19,8 @@
 """
     _deduce_bond_charges(adj, charges) -> Dictionary{UndirectedEdge{V}, I}
 
-Deduce the per-edge charge (on the canonical, smaller-vertex side) of a 1-dim
-product state from the per-vertex charges `charges::Dictionary{V, I}` and the
-adjacency `adj`. Throws if any connected component is not charge-neutral.
+Deduce the per-edge charge (on the canonical, smaller-vertex side) of a 1-dim product state from the per-vertex charges `charges::Dictionary{V, I}` and the adjacency `adj`.
+Throws if any connected component is not charge-neutral.
 """
 function _deduce_bond_charges(adj::Dictionary{V, Vector{V}}, charges::Dictionary{V, I}) where {V, I}
     qedge = Dictionary{UndirectedEdge{V}, I}()

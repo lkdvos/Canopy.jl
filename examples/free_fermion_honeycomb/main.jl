@@ -1,19 +1,34 @@
-# Imaginary-time evolution of spinless free fermions on a finite honeycomb lattice
-#
-#     H = -t Σ_⟨ij⟩ (c†_i c_j + c†_j c_i) - μ Σ_i n_i
-#
-# on an n₁ × n₂ unit-cell PBC honeycomb torus (2 sites per cell, N = 2 n₁ n₂),
-# via simple-update on top of belief-propagation messages. Sweeps μ at fixed t,
-# computes ground-state energy per site E/N and filling ⟨n⟩, and compares
-# against the exact single-particle solution at the same finite (n₁, n₂).
-#
-# The honeycomb lattice has coordination 3 and girth 6, vs. 4 and 4 for the
-# square lattice — BP messages travel further before encountering a loop, so
-# this is a regime where simple-update on top of BP is naturally accurate.
-# The bipartite spectrum is ε±(k) = ±|f(k)| - μ with
-#   f(k) = -t (1 + e^{i k·a₁} + e^{i k·a₂}),  k·a_j = 2π m_j / n_j.
-#
-# Run:  julia --project=examples examples/free_fermion_honeycomb.jl
+using Markdown #hide
+
+md"""
+# Free fermions on a honeycomb lattice
+
+Imaginary-time evolution of spinless free fermions on a finite honeycomb lattice,
+
+```math
+H = -t \sum_{\langle ij \rangle} \left( c^\dagger_i c_j + c^\dagger_j c_i \right) - \mu \sum_i n_i,
+```
+
+on an $n_1 \times n_2$ unit-cell PBC honeycomb torus (2 sites per cell, $N = 2 n_1 n_2$), via
+simple update on top of belief-propagation messages. We sweep $\mu$ at fixed $t$, compute the
+ground-state energy per site $E/N$ and the filling $\langle n \rangle$, and compare against
+the exact single-particle solution at the same finite $(n_1, n_2)$.
+
+The honeycomb lattice has coordination 3 and girth 6, versus 4 and 4 for the square lattice
+— BP messages travel further before encountering a loop, so this is a regime where simple
+update on top of BP is naturally accurate. The bipartite spectrum is
+$\varepsilon_\pm(k) = \pm |f(k)| - \mu$ with
+
+```math
+f(k) = -t \left( 1 + e^{i k \cdot a_1} + e^{i k \cdot a_2} \right), \qquad k \cdot a_j = 2\pi m_j / n_j.
+```
+
+This example can be run from the command line with:
+
+```
+julia --project=examples examples/free_fermion_honeycomb/main.jl
+```
+"""
 
 using Canopy: TensorNetworkState, BPMessages, belief_propagation,
     UndirectedEdge, LocalGate, apply!, reduced_density_matrix, expect,
@@ -27,13 +42,16 @@ using Statistics: mean
 using Printf
 using CairoMakie
 
-# --- exact single-particle reference -----------------------------------------
-# Spinless tight-binding on a honeycomb n₁ × n₂ PBC torus. The finite-torus
-# momenta satisfy k·a_j = 2π m_j / n_j, and each k contributes two bands
-# ε±(k) = ±|f(k)| - μ. Ground state fills every mode with ε < 0; modes at
-# ε = 0 are unfilled (consistent convention at the band edge — relevant on
-# sizes where n₁ and n₂ are both multiples of 3 and the Dirac points are
-# sampled exactly).
+md"""
+## Exact single-particle reference
+
+Spinless tight-binding on a honeycomb $n_1 \times n_2$ PBC torus has finite-torus momenta
+satisfying $k \cdot a_j = 2\pi m_j / n_j$, and each $k$ contributes two bands
+$\varepsilon_\pm(k) = \pm |f(k)| - \mu$. The ground state fills every mode with
+$\varepsilon < 0$; modes at $\varepsilon = 0$ are left unfilled (a consistent convention at
+the band edge — relevant on sizes where $n_1$ and $n_2$ are both multiples of 3 and the
+Dirac points are sampled exactly).
+"""
 
 function exact_per_site(n1::Int, n2::Int, μ::Real; t::Real=1.0)
     εs = Float64[]
@@ -48,10 +66,18 @@ function exact_per_site(n1::Int, n2::Int, μ::Real; t::Real=1.0)
     return sum(filled) / N, length(filled) / N
 end
 
-# --- honeycomb PBC graph ------------------------------------------------------
-# n₁ × n₂ unit cells, each with two sites (A=1, B=2). Linear vertex index:
-#   idx(i, j, s) = ((i-1) n₂ + (j-1)) * 2 + s,    i ∈ 1:n₁, j ∈ 1:n₂.
-# Each A at (i,j) connects to B sites at (i,j), (i+1,j), (i,j+1) (PBC).
+md"""
+## Honeycomb PBC graph
+
+With $n_1 \times n_2$ unit cells, each carrying two sites ($A = 1$, $B = 2$), the linear
+vertex index is
+
+```math
+\mathrm{idx}(i, j, s) = \bigl( (i-1)\, n_2 + (j-1) \bigr) \cdot 2 + s, \qquad i \in 1{:}n_1,\ j \in 1{:}n_2.
+```
+
+Each $A$ at $(i,j)$ connects to the $B$ sites at $(i,j)$, $(i+1,j)$, and $(i,j+1)$ (PBC).
+"""
 
 function honeycomb_graph(n1::Int, n2::Int)
     idx(i, j, s) = ((mod1(i, n1) - 1) * n2 + (mod1(j, n2) - 1)) * 2 + s
@@ -65,7 +91,9 @@ function honeycomb_graph(n1::Int, n2::Int)
     return g
 end
 
-# --- random PBC honeycomb state ----------------------------------------------
+md"""
+## Random PBC honeycomb state
+"""
 
 function honeycomb_state(n1::Int, n2::Int, Dmax::Int; T::Type=ComplexF64)
     g = honeycomb_graph(n1, n2)
@@ -77,10 +105,17 @@ function honeycomb_state(n1::Int, n2::Int, Dmax::Int; T::Type=ComplexF64)
     return st, ekeys
 end
 
-# --- free fermion bond operators ---------------------------------------------
-# Bond Hamiltonian distributed across edges as
-#   h_e = -t hop_e - (μ/deg(u)) n⊗I - (μ/deg(v)) I⊗n
-# so Σ_e h_e = H exactly. On the honeycomb torus every vertex has degree 3.
+md"""
+## Free-fermion bond operators
+
+We distribute the bond Hamiltonian across edges as
+
+```math
+h_e = -t\, \mathrm{hop}_e - \frac{\mu}{\deg(u)}\, n \otimes I - \frac{\mu}{\deg(v)}\, I \otimes n,
+```
+
+so that $\sum_e h_e = H$ exactly. On the honeycomb torus every vertex has degree 3.
+"""
 
 function fermion_bond_hamiltonian(t::Real, μ::Real, deg_u::Int, deg_v::Int; T::Type=ComplexF64)
     hop = f_hopping(T, Trivial)
@@ -89,7 +124,12 @@ function fermion_bond_hamiltonian(t::Real, μ::Real, deg_u::Int, deg_v::Int; T::
     return -t * hop - (μ / deg_u) * (n ⊗ I1) - (μ / deg_v) * (I1 ⊗ n)
 end
 
-# --- run a single (n₁, n₂, μ, Dmax) point ------------------------------------
+md"""
+## Running a single (n₁, n₂, μ, Dmax) point
+
+Each point is evolved with a Strang-split Trotter circuit over a decreasing-`dτ` schedule,
+re-converging the BP messages after every sweep.
+"""
 
 const SCHEDULE = ((0.1, 60), (0.01, 60), (0.001, 60))
 
@@ -122,7 +162,12 @@ function run_one(n1::Int, n2::Int, μ::Real, Dmax::Int;
     return E / N, nbar
 end
 
-# --- scan + plot --------------------------------------------------------------
+md"""
+## Scan and plot
+
+Sweep $\mu$ at two bond dimensions and overlay the simple-update points on a finely sampled
+exact reference curve (the fine grid keeps the finite-size steps rendering correctly).
+"""
 
 function main(; n1::Int=2, n2::Int=2, Dmaxs=(4, 8), μs=range(-3.5, 3.5; length=11), t::Real=1.0)
     E_su = [similar(collect(μs), Float64) for _ in Dmaxs]
