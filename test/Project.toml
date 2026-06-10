@@ -1,4 +1,5 @@
 [deps]
+Bumper = "8ce10254-0962-460f-a3d8-1f77fea1446e"
 Canopy = "98ee57e9-4953-4dfe-8aed-2a71ed84f5ba"
 Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
 Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
@@ -11,5 +12,6 @@ TensorKitTensors = "41b62e7d-e9d1-4e23-942c-79a97adf954b"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
+Bumper = "0.7"
 ParallelTestRunner = "2"
 Test = "1"
