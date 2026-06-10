@@ -298,14 +298,17 @@ function tr_distance(
         p::Real = 1, is_hermitian::Bool = false
     )
     diff = add(A, B, -inv(tr(B)), inv(tr(A)))
-    return norm(is_hermitian ? eigh_vals!(diff) : svd_vals!(diff), p)
+
+    # for small `diff`, need to `project_hermitian!` to make `eigh_vals` happy
+    return norm(is_hermitian ? eigh_vals!(project_hermitian!(diff)) : svd_vals!(diff), p)
 end
 function tr_distance!(
         A::MessageTensor, B::MessageTensor;
         p::Real = 1, is_hermitian::Bool = false
     )
     diff = add!!(A, B, -inv(tr(B)), inv(tr(A)))
-    return norm(is_hermitian ? eigh_vals!(diff) : svd_vals!(diff), p)
+    # for small `diff`, need to `project_hermitian!` to make `eigh_vals` happy
+    return norm(is_hermitian ? eigh_vals!(project_hermitian!(diff)) : svd_vals!(diff), p)
 end
 
 iterate_difference!(prev_messages::BPMessages, messages::BPMessages) =
