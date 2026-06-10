@@ -263,14 +263,12 @@ function compute_message!(
         backend, allocator,
     )
 
-    # TODO: `ncon` currently does not provide allocator checkpointing
-    cp = allocator_checkpoint!(allocator)
-    Tm_idx = replace(1:N, (target + 1) => -2)
-    Td_idx = replace(vcat(2:N, [1]), (target + 1) => -1)
-    tensors = Any[Tm, T']
-    indices = Vector{Int}[Tm_idx, Td_idx]
-    repartition!(msg, ncon(tensors, indices; backend, allocator))
-    allocator_reset!(allocator, cp)
+    tc = target + 1
+    cA = TupleTools.deleteat(ntuple(identity, N), tc)
+    pA = ((tc,), cA)
+    pB = (cA, (tc,))
+    pAB = ((2,), (1,))
+    tensorcontract!(msg, Tm, pA, false, T, pB, true, pAB, One(), Zero(), backend, allocator)
 
     return msg::typeof(msg)
 end
