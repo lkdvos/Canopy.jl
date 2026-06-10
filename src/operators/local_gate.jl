@@ -47,6 +47,12 @@ absorbed during normalization. The 2-site method renormalizes the new bond
 message to unit `normp`-norm (kwarg `normp::Real = 2`; `normp = 0` disables
 normalization and returns `logλ = 0`). The 1-site method does not touch any
 bond message and always returns `logλ = 0`.
+
+The 2-site method gauges with the BP messages via an eigh-based square root;
+its pseudo-inverse clips message eigenvalues at or below `gauge_tol::Real`
+(default [`default_gauge_tol`](@ref)`(state)`), which drops numerical-noise
+directions that would otherwise be inverted and blow up the gauge. Pass
+`gauge_tol = 0` to disable clipping.
 """ apply!
 
 # --- single-site -------------------------------------------------------------
