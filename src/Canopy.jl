@@ -28,7 +28,12 @@ include("bumper.jl")
 
 include("edges.jl")
 
-include("states.jl")
+include("states/tensornetworkstate.jl")
+include("states/lattices.jl")
+include("states/productstate.jl")
+export square_lattice, triangular_lattice, hexagonal_lattice
+export product_state
+
 include("utility.jl")
 include("messages.jl")
 include("beliefpropagation.jl")

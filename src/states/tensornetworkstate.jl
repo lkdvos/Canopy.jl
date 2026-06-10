@@ -134,6 +134,31 @@ function TensorNetworkState(
     return TensorNetworkState{Float64}(undef, g, P, V)
 end
 
+"""
+    TensorNetworkState{T}(undef, edges::AbstractVector{<:UndirectedEdge}, P::S, V::S)
+    TensorNetworkState(undef, edges::AbstractVector{<:UndirectedEdge}, P::S, V::S)
+
+Convenience constructor for a [`TensorNetworkState`](@ref) on the graph spanned
+by `edges`, with uniform per-vertex physical space `P` and uniform per-edge
+virtual space `V`. Vertices are the endpoints appearing in `edges` (any isolated
+vertices are not represented). Useful together with the lattice constructors
+([`square_lattice`](@ref), [`triangular_lattice`](@ref), [`hexagonal_lattice`](@ref)).
+"""
+function TensorNetworkState{T}(
+        ::UndefInitializer, edges::AbstractVector{<:UndirectedEdge}, P::S, V::S,
+    ) where {T, S <: IndexSpace}
+    vspaces = Dictionary(edges, fill(V, length(edges)))
+    verts = keys(adjacency(keys(vspaces)))
+    pspaces = Dictionary(verts, fill(P, length(verts)))
+    return TensorNetworkState{T}(undef, pspaces, vspaces)
+end
+
+function TensorNetworkState(
+        ::UndefInitializer, edges::AbstractVector{<:UndirectedEdge}, P::S, V::S,
+    ) where {S <: IndexSpace}
+    return TensorNetworkState{Float64}(undef, edges, P, V)
+end
+
 for f! in (:rand!, :randn!)
     @eval begin
         Random.$f!(state::TensorNetworkState) =
@@ -293,7 +318,7 @@ end
 Return the 1-based position of `edge` within `neighbors(state, first(edge))`, i.e. the domain-leg index occupied by `edge` in `state[first(edge)]`.
 Throws `ArgumentError` if `edge` is not incident on `first(edge)`.
 """
-function leg_index(state::TensorNetworkState, edge::DirectedEdge)
+function leg_index(state::TensorNetworkState, edge::AbstractEdge)
     idx = findfirst(==(last(edge)), neighbors(state, first(edge)))
     isnothing(idx) && throw(ArgumentError(lazy"edge $edge does not exist"))
     return idx
