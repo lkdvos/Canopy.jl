@@ -34,3 +34,4 @@ First-time precompilation (CairoMakie in particular) can take several minutes.
 - `free_fermion_ring` — spinless free fermions on a 1D PBC ring via simple-update + BP
 - `free_fermion_honeycomb` — spinless free fermions on the honeycomb lattice
 - `tfim_chain_ring` — transverse-field Ising model on a ring, compared to the exact Jordan–Wigner finite-`L` result
+- `realtime` — real-time quench of spinless free fermions on a 48-site hexagonal lattice in a staggered field, BP + truncation vs. the exact single-particle reference (reproduces `FreeFermionBenchmark.pdf`)
