@@ -21,16 +21,25 @@ end
 
 function apply!(
         state::TensorNetworkState, msgs::BPMessages, gates::CompositeGate;
-        timer = nothing, kwargs...,
+        timer = nothing, pool::BufferPool = _default_pool(), kwargs...,
     )
     return @maybe_timeit timer "apply! CompositeGate" begin
         T = real(scalartype(state))
         ϵ = similar(gates.gatelist, T)
         logλ = similar(gates.gatelist, T)
-        Threads.@threads for i in eachindex(gates.gatelist)
-            state, msgs, info = apply!(state, msgs, gates.gatelist[i]; timer, kwargs...)
-            ϵ[i] = info.ϵ
-            logλ[i] = info.logλ
+        ngates = length(gates.gatelist)
+        nworkers = min(Threads.nthreads(), ngates)
+        counter = Threads.Atomic{Int}(1)
+        Threads.@sync for _ in 1:nworkers
+            Threads.@spawn withbuffer(pool) do allocator
+                while true
+                    i = Threads.atomic_add!(counter, 1)
+                    i > ngates && break
+                    state, msgs, info = apply!(state, msgs, gates.gatelist[i]; timer, allocator, kwargs...)
+                    ϵ[i] = info.ϵ
+                    logλ[i] = info.logλ
+                end
+            end
         end
         (state, msgs, (; ϵ = maximum(ϵ), logλ = sum(logλ)))
     end
