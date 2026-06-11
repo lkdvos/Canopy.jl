@@ -11,8 +11,11 @@ Regenerate the rendered markdown (executes each example; SHA256-cached in
 `Cache.toml`, so unchanged examples are skipped on rerun):
 
 ```
-julia --project=examples examples/make.jl
+julia --project=examples -t auto examples/make.jl
 ```
+
+`-t auto` enables the gate-level parallelism in `apply!` (BLAS is pinned to one thread
+inside `make.jl` to avoid oversubscription) — this matters most for the `realtime` example.
 
 Then build the docs site (does not re-execute):
 

@@ -154,10 +154,15 @@ function main(; L::Int=8, Dmax::Int=8, μs=range(-1.0, 1.0; length=5), t::Real=1
     axislegend(ax2; position=:lt)
 
     outdir = joinpath(@__DIR__, "figs"); mkpath(outdir)
-    outfile = joinpath(outdir, "free_fermion_ring.png")
+    outfile = joinpath(outdir, "free_fermion_ring.svg")
     save(outfile, fig)
     println("wrote $outfile")
     return fig
 end
 
 main()
+nothing #hide
+
+md"""
+![Free fermions on a ring](figs/free_fermion_ring.svg)
+"""

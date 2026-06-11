@@ -54,9 +54,9 @@ using CairoMakie
 md"""
 ## Model and run parameters
 
-The defaults run in a few minutes and already show BP tracking the exact curve through the
-first oscillations. For the full `FreeFermionBenchmark.pdf` panel (b) x-axis, set
-`T_FINAL = 5.0` (≈ 10× longer; cost ≈ `length(CHIS) · NSTEPS · BP`).
+The defaults reproduce the full `FreeFermionBenchmark.pdf` panel (b) x-axis, evolving to
+`T_FINAL = 5.0` (cost ≈ `length(CHIS) · NSTEPS · BP`). For a quicker preview that still shows
+BP tracking the exact curve through the first oscillations, lower `T_FINAL` (e.g. `1.5`).
 """
 
 const M, N = 4, 6              # m × n unit cells → 2·m·n = 48 sites
@@ -142,13 +142,15 @@ function run_chi(χ; verbose=true)
     t_bp = 0.0
     for step in 1:NSTEPS
         t1 = time()
-        state, msgs, _ = apply!(state, msgs, single; timer=to)
-        state, msgs, _ = apply!(state, msgs, hop; trunc, timer=to)
-        state, msgs, _ = apply!(state, msgs, single; timer=to)
+        ## `apply!` parallelizes its gates with `Threads.@threads`, so we time it from this
+        ## (sequential) level rather than threading a shared `TimerOutput` into the gate loop.
+        state, msgs, _ = @timeit to "single" apply!(state, msgs, single)
+        state, msgs, _ = @timeit to "hop" apply!(state, msgs, hop; trunc)
+        state, msgs, _ = @timeit to "single" apply!(state, msgs, single)
         t2 = time()
         ## each dt step perturbs the state only slightly, so BP reconverges quickly
         ## from the previous messages — the tol lets it stop early.
-        msgs = belief_propagation(msgs, state; maxiter=BP_ITERS, tol=1e-10, timer=to)
+        msgs = @timeit to "bp" belief_propagation(msgs, state; maxiter=BP_ITERS, tol=1e-10)
         t3 = time()
         t_gate += t2 - t1
         t_bp += t3 - t2
@@ -252,10 +254,15 @@ function main()
 
     outdir = joinpath(@__DIR__, "figs")
     mkpath(outdir)
-    outfile = joinpath(outdir, "realtime_hexagonal.png")
+    outfile = joinpath(outdir, "realtime_hexagonal.svg")
     save(outfile, fig)
     println("wrote $outfile")
     return fig
 end
 
 main()
+nothing #hide
+
+md"""
+![Real-time evolution of free fermions](figs/realtime_hexagonal.svg)
+"""

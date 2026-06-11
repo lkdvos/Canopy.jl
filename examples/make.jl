@@ -9,6 +9,12 @@ end
 using Canopy
 using Literate
 using TOML, SHA
+using LinearAlgebra: BLAS
+
+# Gate application parallelizes over non-overlapping gates (see `CompositeGate`); the
+# per-gate contractions are tiny, so pin BLAS to one thread to avoid oversubscription
+# against those workers. Run this script with `julia -t auto` to make it effective.
+BLAS.set_num_threads(1)
 
 const EXAMPLES_DIR = @__DIR__
 const OUTPUT_DIR = joinpath(@__DIR__, "..", "docs", "src", "examples")

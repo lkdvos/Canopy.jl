@@ -226,10 +226,15 @@ function main(; n1::Int=2, n2::Int=2, Dmaxs=(4, 8), μs=range(-3.5, 3.5; length=
 
     outdir = joinpath(@__DIR__, "figs")
     mkpath(outdir)
-    outfile = joinpath(outdir, "free_fermion_honeycomb.png")
+    outfile = joinpath(outdir, "free_fermion_honeycomb.svg")
     save(outfile, fig)
     println("wrote $outfile")
     return fig
 end
 
 main()
+nothing #hide
+
+md"""
+![Free fermions on a honeycomb lattice](figs/free_fermion_honeycomb.svg)
+"""

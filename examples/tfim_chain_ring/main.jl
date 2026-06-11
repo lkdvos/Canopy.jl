@@ -158,10 +158,15 @@ function main(; L::Int=16, Dmax::Int=8, hs=range(0.2, 1.8; length=9), J::Real=1.
     axislegend(ax2; position=:rb)
 
     outdir = joinpath(@__DIR__, "figs"); mkpath(outdir)
-    outfile = joinpath(outdir, "tfim_chain_ring.png")
+    outfile = joinpath(outdir, "tfim_chain_ring.svg")
     save(outfile, fig)
     println("wrote $outfile")
     return fig
 end
 
 main()
+nothing #hide
+
+md"""
+![Transverse-field Ising model on a ring](figs/tfim_chain_ring.svg)
+"""
