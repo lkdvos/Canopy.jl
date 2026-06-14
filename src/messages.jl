@@ -145,45 +145,54 @@ end
 # BP contractions
 # ---------------
 
-# Shared primitive: absorb a `V_k ← V_k` factor on selected domain legs of
-# `T`. For each `(k, L)` in `leg_factors`, `L`'s domain contracts against `T`'s
-# domain leg at slot `k` and `L`'s codomain takes its place. Legs not listed
-# pass through unchanged, so the result has the same `TensorMap` space as `T`
-# (up to a leg duality that a factor may flip).
-#
-# Implemented as a chain of single-leg `tensorcontract!`s without restoring the
-# canonical leg order between iterations: each step appends `L`'s codomain to the
-# tail and shifts surviving legs down, with `pos` tracking the current position
-# of every original leg; a final `permute!` restores the layout.
-function _absorb_legs(T::TensorMap{Tn, S, 1, N, A}, leg_factors, backend, allocator) where {Tn, S, N, A}
-    N1 = N + 1
-    pos = collect(1:N1)
-    out = T
+function _mul_leg!(
+        dst::TensorMap{<:Any, S, 1, N}, src::TensorMap{<:Any, S, 1, N}, L, k::Int,
+        backend, allocator,
+    ) where {S, N}
+    M = N + 1
+    d = k + 1
+    oindA = TupleTools.deleteat(ntuple(identity, M), d)
+    pB = ((2,), (1,))                                  # contract L's codomain, keep its domain
+    pAB = (ntuple(j -> j < d ? j : (j == d ? M : j - 1), M), ())  # restore the new leg to slot `d`
+    dualleg = isdual(space(src, d))
     cp = allocator_checkpoint!(allocator)
-    for (k, L) in leg_factors
-        target_curr = pos[k + 1]
-        open_idx = TupleTools.deleteat(ntuple(identity, N1), target_curr)
-        pA = (open_idx, (target_curr,))
+    for (f₁, f₂) in fusiontrees(dst)
+        σ = f₂.uncoupled[k]
+        α = dualleg ? convert(eltype(dst), twist(σ)) : One()
+        tensorcontract!(
+            dst[f₁, f₂], src[f₁, f₂], (oindA, (d,)), false, block(L, conj(σ)), pB, false, pAB,
+            α, Zero(), backend, allocator,
+        )
+    end
+    allocator_reset!(allocator, cp)
+    return dst
+end
+
+function _absorb_legs(T::TensorMap{Tn, S, 1, N, A}, leg_factors, backend, allocator) where {Tn, S, N, A}
+    factors = collect(leg_factors)
+    isempty(factors) && return copy(T)
+    M = N + 1
+    cp = allocator_checkpoint!(allocator)
+    out = T
+    for i in eachindex(factors)
+        k, L = factors[i]
+        d = k + 1
+        oindA = TupleTools.deleteat(ntuple(identity, M), d)
+        pA = (oindA, (d,))
         pB = ((2,), (1,))
-        pAB = ((1,), ntuple(i -> i + 1, N))
+        pAB = ((1,), ntuple(j -> j + 1 < d ? j + 1 : (j + 1 == d ? M : j), N))  # new leg back to slot d
         TC = promote_contract(scalartype(out), scalartype(L))
-        new_out = tensoralloc_contract(TC, out, pA, false, L, pB, false, pAB, Val(true), allocator)
-        tensorcontract!(new_out, out, pA, false, L, pB, false, pAB, One(), Zero(), backend, allocator)
-        @inbounds for i in 1:N1
-            if i == k + 1
-                pos[i] = N1
-            elseif pos[i] > target_curr
-                pos[i] -= 1
-            end
+        new_out = tensoralloc_contract(TC, out, pA, false, L, pB, false, pAB, Val(i != lastindex(factors)), allocator)
+        if space(L, 1) == space(out, d)
+            _mul_leg!(new_out, out, L, k, backend, allocator)          # space-preserving (BP message)
+        else
+            tensorcontract!(new_out, out, pA, false, L, pB, false, pAB, One(), Zero(), backend, allocator)  # space-flipping (gauge √)
         end
         out === T || tensorfree!(out, allocator)
         out = new_out
     end
-    perm = ((1,), ntuple(j -> pos[j + 1], N))
-    result = permute!(similar(T, permute(space(out), perm)), out, perm)
-    out === T || tensorfree!(out, allocator)
     allocator_reset!(allocator, cp)
-    return result
+    return out
 end
 
 """
