@@ -43,24 +43,21 @@ function apply!(
         end
 
         # Apply gate and factorize
-        U, Σ, Vᴴ, ϵ = @maybe_timeit timer "gate+SVD" begin
+        U, Σ, Vᴴ, logλ, ϵ = @maybe_timeit timer "gate+SVD" begin
             @tensor backend = backend allocator = allocator θ[-1 -2; -3 -4] := R₁[-1; 1 2] * R₂[-3; 3 2] * G[-2 -4; 1 3]
-            svd_trunc!(θ; trunc)
+            U, Σ, Vᴴ, ϵ = svd_trunc!(θ; trunc)
+            if iszero(normp)
+                logλ = zero(scalartype(Σ))
+            else
+                α = norm(Σ, normp)
+                logλ = log(α)
+                scale!(Σ, inv(α))
+            end
+            sqrtΣ = sqrt(Σ)
+            rmul!(U, sqrtΣ)
+            lmul!(sqrtΣ, Vᴴ)
+            U, Σ, Vᴴ, logλ, ϵ
         end
-
-        Σdiag = collect(scalartype(msgs), diagview(Σ))
-        T = real(scalartype(state))
-        if normp == 0
-            logλ = zero(T)
-            diagview(Σ) .= sqrt.(diagview(Σ))
-        else
-            α = norm(Σdiag, normp)
-            logλ = log(α)
-            Σdiag ./= α
-            diagview(Σ) .= sqrt.(diagview(Σ) ./ α)
-        end
-        rmul!(U, Σ)
-        lmul!(Σ, Vᴴ)
 
         @maybe_timeit timer "reconstruct" begin
             # Store result in state
@@ -79,9 +76,9 @@ function apply!(
 
         # Bond messages from the new Schmidt diagonal
         V′ = virtualspace(state, DirectedEdge(s₁, s₂))
-        msgs.messages[DirectedEdge(s₂, s₁)] = DiagonalTensorMap(Σdiag, V′)
+        msgs.messages[DirectedEdge(s₂, s₁)] = DiagonalTensorMap(Σ.data, V′)
         V′ᵈ = virtualspace(state, DirectedEdge(s₂, s₁))
-        msgs.messages[DirectedEdge(s₁, s₂)] = DiagonalTensorMap(Σdiag, V′ᵈ)
+        msgs.messages[DirectedEdge(s₁, s₂)] = DiagonalTensorMap(Σ.data, V′ᵈ)
 
         (state, msgs, (; ϵ, logλ))
     end
@@ -101,27 +98,19 @@ override it (e.g. `0` to disable clipping).
 """
 default_gauge_tol(x) = eps(real(scalartype(x)))^(3 // 4)
 
-# Regularized inverse square root: `(√x, 1/√x)` for `x` above the floor `tol`,
-# and `(0, 0)` otherwise — so vanishing (noise) eigenvalues are projected out of
-# the gauge instead of being inverted.
-function safe_sqrt_invsqrt(x, tol::Real)
-    x > tol || return zero(x), zero(x)
-    s = sqrt(x)
-    return s, inv(s)
-end
+safe_sqrt(x, tol::Real) = x > tol ? sqrt(x) : zero(x)
+safe_inv(x) = iszero(x) ? x : inv(x)
 
 # Eigh-based square root and pseudo-inverse of a Hermitian PSD message,
 # clipping eigenvalues at or below `tol` (see [`default_gauge_tol`](@ref)).
 function _eigh_sqrt(m; tol::Real = default_gauge_tol(m))
     @assert tol ≥ 0 "Tolerance must be non-negative"
     D, U = eigh_full(m)
-    λ = diagview(D)
-    λ⁻¹ = similar(λ)
-    @inbounds for i in eachindex(λ)
-        λ[i], λ⁻¹[i] = safe_sqrt_invsqrt(λ[i], tol)
-    end
-    Λ = D * U'
-    Λ⁻¹ = rmul!(U, DiagonalTensorMap(λ⁻¹))
+    dD = parent(diagview(D))
+    dD .= safe_sqrt.(dD, tol)
+    Λ = lmul!(D, copy(U'))
+    dD .= safe_inv.(dD)
+    Λ⁻¹ = rmul!(U, D)
     return Λ, Λ⁻¹
 end
 
