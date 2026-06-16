@@ -310,7 +310,7 @@ end
 function belief_propagation(
         messages::BPMessages, state::TensorNetworkState;
         maxiter::Int, tol::Real = 0, schedule::BPSchedule = SynchronousSchedule(),
-        timer = nothing, backend = DefaultBackend(), allocator = _default_allocator(),
+        timer = nothing, backend = DefaultBackend(), allocator = default_allocator(state),
     )
     stopping = AI.StopAfterIteration(maxiter)
     tol > 0 && (stopping = stopping | StopWhenStable(tol))

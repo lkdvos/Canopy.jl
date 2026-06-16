@@ -22,7 +22,7 @@ using Test
 end
 
 
-@testset "CompositeGate applies disjoint gates in parallel" begin
+@testset "CompositeGate applies disjoint gates" begin
     P = ComplexSpace(2); V = ComplexSpace(3)
     pspaces = Dictionary([1, 2, 3, 4], fill(P, 4))
     vspaces = Dictionary(

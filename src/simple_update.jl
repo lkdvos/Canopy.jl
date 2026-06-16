@@ -2,7 +2,7 @@
 function apply!(
         state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 2};
         trunc = notrunc(), gauge_tol::Real = default_gauge_tol(state), normp::Real = 2,
-        timer = nothing, backend = DefaultBackend(), allocator = _default_allocator(),
+        timer = nothing, backend = DefaultBackend(), allocator = default_allocator(state),
     )
     return @maybe_timeit timer "apply! 2-site" begin
         _check_compatible(state, gate)

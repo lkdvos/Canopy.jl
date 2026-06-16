@@ -21,7 +21,7 @@ expectation values can be computed as `tr(O * ρ)`.
 
 function reduced_density_matrix(
         sites::NTuple{1, V}, state::TensorNetworkState, messages::BPMessages;
-        backend = DefaultBackend(), allocator = _default_allocator(),
+        backend = DefaultBackend(), allocator = default_allocator(state),
     ) where {V}
     site = only(sites)
     Tm = attach_all_messages(state, messages, site, backend, allocator)
@@ -34,7 +34,7 @@ end
 
 function reduced_density_matrix(
         sites::NTuple{2, V}, state::TensorNetworkState, messages::BPMessages;
-        backend = DefaultBackend(), allocator = _default_allocator(),
+        backend = DefaultBackend(), allocator = default_allocator(state),
     ) where {V}
     has_edge(state, sites...) || error("not implemented")
 

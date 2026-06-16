@@ -24,27 +24,18 @@ Adapt.adapt_structure(to, gates::CompositeGate) =
 
 function apply!(
         state::TensorNetworkState, msgs::BPMessages, gates::CompositeGate;
-        timer = nothing, pool::BufferPool = _default_pool(), kwargs...,
+        timer = nothing, allocator = default_allocator(state), kwargs...,
     )
     return @maybe_timeit timer "apply! CompositeGate" begin
         T = real(scalartype(state))
-        ϵ = similar(gates.gatelist, T)
-        logλ = similar(gates.gatelist, T)
-        ngates = length(gates.gatelist)
-        nworkers = min(Threads.nthreads(), ngates)
-        counter = Threads.Atomic{Int}(1)
-        Threads.@sync for _ in 1:nworkers
-            Threads.@spawn withbuffer(pool) do allocator
-                while true
-                    i = Threads.atomic_add!(counter, 1)
-                    i > ngates && break
-                    state, msgs, info = apply!(state, msgs, gates.gatelist[i]; timer, allocator, kwargs...)
-                    ϵ[i] = info.ϵ
-                    logλ[i] = info.logλ
-                end
-            end
+        ϵ = zero(T)
+        logλ = zero(T)
+        for gate in gates.gatelist
+            state, msgs, info = apply!(state, msgs, gate; timer, allocator, kwargs...)
+            ϵ = max(ϵ, info.ϵ)
+            logλ += info.logλ
         end
-        (state, msgs, (; ϵ = maximum(ϵ), logλ = sum(logλ)))
+        (state, msgs, (; ϵ, logλ))
     end
 end
 

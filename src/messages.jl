@@ -215,7 +215,7 @@ unchanged.
 """
 function attach_messages(
         state::TensorNetworkState, msgs::BPMessages, site, edges,
-        backend = DefaultBackend(), allocator = _default_allocator(),
+        backend = DefaultBackend(), allocator = default_allocator(state),
     )
     leg_factors = map(edges) do e
         last(e) == site || throw(ArgumentError(lazy"edge $e does not terminate at $site"))
@@ -233,7 +233,7 @@ Equivalent to `attach_messages(state, msgs, site, incoming_edges(state, site))`.
 """
 attach_all_messages(
     state::TensorNetworkState, msgs::BPMessages, site,
-    backend = DefaultBackend(), allocator = _default_allocator(),
+    backend = DefaultBackend(), allocator = default_allocator(state),
 ) = attach_messages(state, msgs, site, incoming_edges(state, site), backend, allocator)
 
 """
@@ -255,12 +255,12 @@ message.
 """
 compute_message(
     msgs::BPMessages, state::TensorNetworkState, edge::DirectedEdge,
-    backend = DefaultBackend(), allocator = _default_allocator(),
+    backend = DefaultBackend(), allocator = default_allocator(state),
 ) = compute_message!(similar(msgs[edge]), msgs, state, edge, backend, allocator)
 
 function compute_message!(
         msg, msgs::BPMessages, state::TensorNetworkState, edge::DirectedEdge,
-        backend = DefaultBackend(), allocator = _default_allocator(),
+        backend = DefaultBackend(), allocator = default_allocator(state),
     )
     site = first(edge)
     target = leg_index(state, edge)
