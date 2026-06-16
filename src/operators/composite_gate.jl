@@ -19,6 +19,9 @@ function CompositeGate(gatelist::Vector{G}) where {G <: LocalGate}
     return CompositeGate{scalartype(G), spacetype(G), V, G}(gatelist)
 end
 
+Adapt.adapt_structure(to, gates::CompositeGate) =
+    CompositeGate(map(g -> adapt(to, g), gates.gatelist))
+
 function apply!(
         state::TensorNetworkState, msgs::BPMessages, gates::CompositeGate;
         timer = nothing, pool::BufferPool = _default_pool(), kwargs...,
@@ -54,6 +57,8 @@ content — does not include BP reconvergence.
 struct Circuit{T <: Number, S <: ElementarySpace, V, G <: AbstractGate{T, S, V}}
     gatelist::Vector{G}
 end
+
+Adapt.adapt_structure(to, c::Circuit) = Circuit(map(g -> adapt(to, g), c.gatelist))
 
 function apply!(
         state::TensorNetworkState, msgs::BPMessages, circuit::Circuit;

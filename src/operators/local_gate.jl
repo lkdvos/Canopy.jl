@@ -22,6 +22,8 @@ end
 LocalGate(sites::NTuple{N, V}, tensor::TT) where {T, N, S, V, TT <: AbstractTensorMap{T, S, N, N}} =
     LocalGate{T, N, S, TT, V}(sites, tensor)
 
+Adapt.adapt_structure(to, g::LocalGate) = LocalGate(g.sites, adapt(to, g.tensor))
+
 # Structural checks against `state`: sites exist, gate space matches the
 # physical spaces at those sites, and (for two-site gates) the sites form
 # an existing edge.

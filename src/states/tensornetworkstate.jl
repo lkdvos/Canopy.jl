@@ -29,6 +29,12 @@ struct TensorNetworkState{T <: Number, S <: IndexSpace, N, A <: DenseVector{T}, 
     end
 end
 
+function TensorNetworkState(
+        adjacency::Dictionary{V, Vector{V}}, vertices::Dictionary{V, StateTensor{T, S, N, A}}
+    ) where {T, S, N, A, V}
+    return TensorNetworkState{T, S, N, A, V}(adjacency, vertices)
+end
+
 # Constructors
 # ------------
 """
@@ -180,6 +186,9 @@ VectorInterface.scalartype(::Type{T}) where {T <: TensorNetworkState} = scalarty
 TensorKit.storagetype(::Type{T}) where {T <: TensorNetworkState} = storagetype(eltype(T))
 TensorKit.spacetype(::Type{T}) where {T <: TensorNetworkState} = spacetype(eltype(T))
 
+Adapt.adapt_structure(to, state::TensorNetworkState) =
+    TensorNetworkState(state.adjacency, map(adapt(to), state.vertices))
+
 """
     physicalspace(state, vertex) -> S
 
@@ -308,7 +317,7 @@ Iterator over the directed edges `DirectedEdge(n, site)` for every neighbor
 The result is a lazy generator suitable for `attach_messages`, `map`, and
 `for` loops. Order matches `neighbors(state, site)`.
 """
-function incoming_edges(state::TensorNetworkState, site; exclude=())
+function incoming_edges(state::TensorNetworkState, site; exclude = ())
     return (DirectedEdge(n, site) for n in neighbors(state, site) if !(n in exclude))
 end
 

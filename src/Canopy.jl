@@ -23,6 +23,7 @@ using MatrixAlgebraKit: diagview, eigh_full, eigh_vals!, qr_compact, svd_trunc, 
 using TimerOutputs: TimerOutput, @timeit
 using VectorInterface
 using Bumper: Bumper
+using Adapt: Adapt, adapt
 
 include("bumper.jl")
 

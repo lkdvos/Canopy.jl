@@ -7,6 +7,7 @@ authors = ["lkdvos <ldevos98@gmail.com> and contributors"]
 projects = ["test", "docs", "examples", "benchmark"]
 
 [deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 AlgorithmsInterface = "d1e3940c-cd12-4505-8585-b0a4b322527d"
 Bumper = "8ce10254-0962-460f-a3d8-1f77fea1446e"
 Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
@@ -19,6 +20,7 @@ TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 VectorInterface = "409d34a3-91d5-4945-b6ec-7529ddf182d8"
 
 [compat]
+Adapt = "4"
 AlgorithmsInterface = "0.1.0"
 Bumper = "0.7.2"
 Dictionaries = "0.4.6"
