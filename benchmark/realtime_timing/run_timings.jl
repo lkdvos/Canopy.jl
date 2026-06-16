@@ -18,9 +18,10 @@ Pkg.activate(@__DIR__; io=devnull)
 
 using ArgParse
 using Canopy: hexagonal_lattice, product_state, BPMessages, belief_propagation,
-    LocalGate, CompositeGate, Circuit, apply!, edge_coloring, virtualspace
+    LocalGate, CompositeGate, Circuit, apply!, edge_coloring, virtualspace, UndirectedEdge
 using TensorKit
 using TensorKitTensors.FermionOperators: f_num, f_hopping, fermion_space
+using TensorKitTensors.SpinOperators: σˣ, σᶻ
 using MatrixAlgebraKit: truncrank
 using Dictionaries
 using DataFrames
@@ -52,6 +53,10 @@ function parse_cli(args)
         help = "fixed BP sweeps per step (run with tol=0)"
         arg_type = Int
         default = 30
+        "--model"
+        help = "physics model: free-fermion (default), free-fermion-u1 (U(1) particle-number conserving), or tfim (staggered transverse-field Ising)"
+        default = "free-fermion"
+        range_tester = m -> m in ("free-fermion", "free-fermion-u1", "tfim")
     end
     return parse_args(args, s)
 end
@@ -59,28 +64,74 @@ end
 const M, N = 4, 6              # m × n unit cells → 2·m·n = 48 sites
 const T_HOP = -1.0
 const MU = 1.0
+const J_ISING = 1.0
+const H_FIELD = 1.0
 const DT = 0.01
 
 const ES = hexagonal_lattice(M, N)
 const VERTS = sort(unique(Iterators.flatten((e.src, e.dst) for e in ES)))
 const NSITES = length(VERTS)
-const HOPOP = f_hopping(ComplexF64, Trivial)
+const DUMMY = (0, 0, 0)        # charge-bath site for the U(1) model (distinct from (i,j,s), i,j≥1)
 
 μ_of(v) = isodd(v[3]) ? MU : -MU
 occ_of(v) = (sum(v) % 4 == 0) ? 0 : 1
+h_of(v) = isodd(v[3]) ? H_FIELD : -H_FIELD   # staggered transverse field, by sublattice
+spinup_of(v) = isodd(v[3])                    # Néel pattern: sublattice A up / B down
 
-function initial_state()
+function initial_state(model)
+    if model == "tfim"
+        P = ComplexSpace(2)
+        ps = Dictionary(VERTS, fill(P, length(VERTS)))
+        ls = Dictionary(VERTS, [Trivial() => (spinup_of(v) ? ComplexF64[1, 0] : ComplexF64[0, 1]) for v in VERTS])
+        return product_state(ComplexF64, ES, ps, ls)
+    elseif model == "free-fermion-u1"
+        # The lattice carries total charge fℤ₂(Q mod 2) ⊠ U1Irrep(Q) with Q = Σ occ_of(v); only the
+        # trivial total charge is representable, so we anchor a single charge-bath "dummy" site
+        # carrying the compensating charge to the lattice. It stays idle (no gate, 1-dim bond).
+        Q = sum(occ_of(v) for v in VERTS)
+        dsec = fℤ₂(mod(Q, 2)) ⊠ U1Irrep(-Q)
+        P = fermion_space(U1Irrep)
+        I = sectortype(P)
+        verts = vcat(VERTS, [DUMMY])
+        es = vcat(ES, [UndirectedEdge(DUMMY, first(VERTS))])
+        ps = Dictionary(verts, vcat(fill(P, length(VERTS)), [Vect[I](dsec => 1)]))
+        ls = Dictionary(
+            verts,
+            vcat(
+                [(fℤ₂(occ_of(v)) ⊠ U1Irrep(occ_of(v))) => [1.0] for v in VERTS],
+                [dsec => [1.0]],
+            ),
+        )
+        return product_state(ComplexF64, es, ps, ls)
+    end
     P = fermion_space(Trivial)
     ps = Dictionary(VERTS, fill(P, length(VERTS)))
     ls = Dictionary(VERTS, [fℤ₂(occ_of(v)) => [1.0] for v in VERTS])
     return product_state(ComplexF64, ES, ps, ls)
 end
 
-function build_layers()
-    n = f_num(ComplexF64, Trivial)
+# Returns (single-site layer, two-site layer); the two-site layer is the `hop` phase in the CSV
+# (free-fermion hopping, or the σᶻσᶻ Ising coupling for the TFIM).
+function build_layers(model)
+    if model == "tfim"
+        sx, sz = σˣ(ComplexF64), σᶻ(ComplexF64)
+        g_plus = exp(-im * H_FIELD * DT * sx)
+        g_minus = exp(-im * (-H_FIELD) * DT * sx)
+        g_zz = exp(-im * (-J_ISING * DT) * (sz ⊗ sz))
+        single = CompositeGate([LocalGate((v,), h_of(v) > 0 ? g_plus : g_minus) for v in VERTS])
+        two = Circuit(
+            [
+            CompositeGate([LocalGate((e.src, e.dst), g_zz) for e in class])
+            for class in edge_coloring(ES)
+        ]
+        )
+        return single, two
+    end
+    sym = model == "free-fermion-u1" ? U1Irrep : Trivial
+    n = f_num(ComplexF64, sym)
     g_plus = exp(-im * MU * DT * n)
     g_minus = exp(-im * (-MU) * DT * n)
-    g_hop = exp(-im * (T_HOP * DT) * HOPOP)
+    g_hop = exp(-im * (T_HOP * DT) * f_hopping(ComplexF64, sym))
     single = CompositeGate([LocalGate((v,), μ_of(v) > 0 ? g_plus : g_minus) for v in VERTS])
     hop = Circuit(
         [
@@ -96,10 +147,10 @@ maxdim(state) = maximum(dim(virtualspace(state, e)) for e in ES)
 # One timed trajectory. Returns a wide DataFrame; row `step=0` is the initial BP convergence
 # (gate columns 0.0), rows `step ≥ 1` are the Trotter steps. No warmup: step 1 carries Julia's
 # JIT-compilation cost, which is itself informative.
-function run_chi_timed(χ, nsteps, bp_iters)
-    state = initial_state()
+function run_chi_timed(χ, nsteps, bp_iters, model)
+    state = initial_state(model)
     msgs = BPMessages(state)
-    single, hop = build_layers()
+    single, hop = build_layers(model)
     trunc = truncrank(χ)
     nt = Threads.nthreads()
 
@@ -142,18 +193,19 @@ end
 function (@main)(args)
     opts = parse_cli(args)
     prefix, outdir = opts["prefix"], opts["outdir"]
-    nsteps, chis, bp_iters = opts["nsteps"], opts["chi"], opts["bp-iters"]
+    nsteps, chis, bp_iters, model = opts["nsteps"], opts["chi"], opts["bp-iters"], opts["model"]
+    suffix = get(Dict("tfim" => "_tfim", "free-fermion-u1" => "_u1"), model, "")
 
     @printf("Real-time timing on a %d-site hexagonal lattice (Canopy.jl)\n", NSITES)
     @printf(
-        "prefix=%s  dt=%.3g  nsteps=%d  bp_iters=%d  χ=%s  threads=%d\n\n",
-        prefix, DT, nsteps, bp_iters, chis, Threads.nthreads()
+        "model=%s  prefix=%s  dt=%.3g  nsteps=%d  bp_iters=%d  χ=%s  threads=%d\n\n",
+        model, prefix, DT, nsteps, bp_iters, chis, Threads.nthreads()
     )
 
     mkpath(outdir)
     for χ in chis
-        df = run_chi_timed(χ, nsteps, bp_iters)
-        outfile = joinpath(outdir, "$(prefix)_chi$(χ).csv")
+        df = run_chi_timed(χ, nsteps, bp_iters, model)
+        outfile = joinpath(outdir, "$(prefix)$(suffix)_chi$(χ).csv")
         CSV.write(outfile, df)
         loop = df[df.step.>=1, :]
         med = sort(loop.single1 .+ loop.hop .+ loop.single2 .+ loop.bp)[cld(nrow(loop), 2)]

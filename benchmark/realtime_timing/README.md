@@ -11,7 +11,8 @@ comparable across libraries.
 
 - `run_timings.jl` — instrumented runner; writes one CSV per χ.
 - `plot_timings.jl` — reads a directory of CSVs and renders comparison figures.
-- `data/` — output CSVs. `figs/` — output figures.
+- `profile_runs.jl` — sampling profiler; writes pprof artifacts per χ (see *Profiling* below).
+- `data/` — output CSVs. `figs/` — output figures. `profiles/` — output pprof profiles.
 
 Both scripts are self-contained executables (shebang + `Pkg.activate(@__DIR__)`), so the first
 run precompiles this folder's environment (`Project.toml`).
@@ -30,6 +31,52 @@ JULIA_NUM_THREADS=8 ./run_timings.jl --prefix canopy --nsteps 50 --chi 4 8 16 32
 ```bash
 julia --project=benchmark/realtime_timing benchmark/realtime_timing/run_timings.jl --help
 ```
+
+### Model selection
+
+`--model free-fermion` (default) runs the quench described above. `--model free-fermion-u1` runs
+the *same* free-fermion quench but with conserved U(1) particle number (sector `fℤ₂ ⊠ U1Irrep`),
+to measure the cost of symmetry-block bookkeeping. Since only the trivial total charge is
+representable, a single charge-bath "dummy" site carrying the compensating charge is anchored to
+the lattice by one 1-dimensional bond; it stays idle (no gate) so the timing reflects the U(1)
+overhead on the real lattice bonds. These runs are written to `<prefix>_u1_chi<χ>.csv`.
+
+`--model tfim` instead runs a transverse-field Ising model with a *staggered* transverse field
+(`exp(-i·(±h)·dt·σˣ)`, sign alternating by sublattice) and a uniform `σᶻσᶻ` coupling, starting
+from a Néel product state. It keeps the same 3-layer step structure, so the CSV schema and
+`plot_timings.jl` are unchanged — the `hop` column then times the `σᶻσᶻ` coupling layer. TFIM runs
+are written to a separate file, `<prefix>_tfim_chi<χ>.csv`, so they never collide with the
+free-fermion CSVs.
+
+## Profiling
+
+The CSVs say *which phase* is slow; `profile_runs.jl` says *which lines*. It warms up to the
+bond-dimension plateau and then samples the profiler over each phase separately, writing
+interactive [pprof](https://github.com/google/pprof) artifacts (PProf.jl bundles the viewer, so
+nothing external is needed):
+
+```bash
+JULIA_NUM_THREADS=8 ./profile_runs.jl --chi 16 32
+```
+
+Per χ this writes to `profiles/`:
+
+- `chi<χ>_cpu_bp.pb.gz` — CPU profile of `belief_propagation` only (the dominant phase).
+- `chi<χ>_cpu_hop.pb.gz` — CPU profile of the hopping layer only.
+- `chi<χ>_cpu_step.pb.gz` — CPU profile of the full Trotter step (single → hop → single → bp).
+- `chi<χ>_allocs.pb.gz` — allocation profile of the full step (heap hotspots only; Canopy's
+  off-heap Bumper temporaries are invisible to the allocation profiler, as with the CSV `*_bytes`).
+- `chi<χ>_meta.txt` — χ, threads, `bp_iters`, repeats, reached `maxdim`.
+
+BP is sampled with `tol = 0` for a fixed `--bp-iters` sweeps, so repeated calls on a converged
+state do identical, representative work. View a saved profile in a browser flamegraph with:
+
+```bash
+julia --project=benchmark/realtime_timing -e \
+  'using PProf; PProf.refresh(file="benchmark/realtime_timing/profiles/chi32_cpu_bp.pb.gz")'
+```
+
+`--help` lists all options (`--warmup`, `--repeats`, `--alloc-rate`, …).
 
 ### Comparing libraries
 
