@@ -276,8 +276,9 @@ function compute_message!(
     cA = TupleTools.deleteat(ntuple(identity, N), tc)
     pA = ((tc,), cA)
     pB = (cA, (tc,))
-    pAB = ((2,), (1,))
-    tensorcontract!(msg, Tm, pA, false, T, pB, true, pAB, One(), Zero(), backend, allocator)
+    cp = allocator_checkpoint!(allocator)
+    tensorcontract!(msg, Tm, pA, false, T, pB, true, ((2,), (1,)), One(), Zero(), backend, allocator)
+    allocator_reset!(allocator, cp)
 
     return msg::typeof(msg)
 end
