@@ -320,7 +320,93 @@ function compute_outgoing_messages!(
         out, msgs::BPMessages, state::TensorNetworkState, v,
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
-    return _outgoing_doublelayer!(out, msgs, state, v, backend, allocator)
+    if sectortype(spacetype(state)) === Trivial
+        return _outgoing_dense!(out, msgs, state, v, backend, allocator)
+    else
+        return _outgoing_doublelayer!(out, msgs, state, v, backend, allocator)
+    end
+end
+
+# --- dense (Trivial-sector) contiguity-optimized path -------------------------
+# For a Trivial sector the on-site tensor is a single fusion-tree block, so we
+# run the double-layer leave-one-out on plain arrays with explicit
+# `permutedims`/BLAS, controlling the TTGT transposes directly (physical leg kept
+# as the leading contiguous axis). Data is extracted via fusion-tree getindex
+# `t[f₁,f₂]` (the storage basis `_mul_leg!` uses — uniform for `TensorMap` and
+# `AdjointTensorMap`, so duals need no special handling). This is the dense core
+# the symmetric path would reuse per fusion-tree block.
+
+# Block of a single-fusiontree-pair tensor in storage basis (the basis the
+# verified kernels contract in; uniform for `TensorMap`/`AdjointTensorMap`).
+_only_block(t) = (fs = only(fusiontrees(t)); Array(t[fs...]))
+
+# Absorb message-matrix `m` into virtual leg `ℓ` of dense block `W`, whose virtual
+# legs sit at axes `legaxis` (physical leg fixed at axis 1). The new leg is left
+# at the *last* axis rather than restored to `ℓ`'s old slot: the `pAB` restore is
+# a full extra transpose pass (~2.3× the cost of the absorption), and leaving the
+# leg last avoids it. Returns the new block and its updated leg→axis map.
+function _absorb_ll(W, m::AbstractMatrix, ℓ::Int, legaxis, backend, allocator)
+    M = ndims(W)
+    ax = legaxis[ℓ]
+    oindA = TupleTools.deleteat(ntuple(identity, M), ax)
+    C = similar(W, ntuple(i -> i < M ? size(W, oindA[i]) : size(W, ax), M))
+    # output order = (oindA..., new leg) ⇒ new leg last, no restore transpose
+    tensorcontract!(C, W, (oindA, (ax,)), false, m, ((2,), (1,)), false,
+        (ntuple(identity, M), ()), One(), Zero(), backend, allocator)
+    newaxis = [a == ax ? M : (a > ax ? a - 1 : a) for a in legaxis]
+    return C, newaxis
+end
+
+# Close ket block `K` (legs at `legK`) against bra block `S` (legs at `legS`) over
+# the physical leg + every virtual leg except `k`, writing the message into
+# `out_mat`. The contracted legs are listed in matching order on both sides;
+# `conjB=true` and the `((2,),(1,))` output (codomain = bra) mirror
+# `compute_message!`'s closing.
+function _close_ll!(out_mat, K, legK, S, legS, k::Int, backend, allocator)
+    d = length(legK)
+    others = (ℓ for ℓ in 1:d if ℓ != k)
+    contK = (1, (legK[ℓ] for ℓ in others)...)
+    contS = (1, (legS[ℓ] for ℓ in others)...)
+    pA = ((legK[k],), contK)
+    pB = (contS, (legS[k],))
+    tensorcontract!(out_mat, K, pA, false, S, pB, true, ((2,), (1,)), One(), Zero(), backend, allocator)
+    return out_mat
+end
+
+function _outgoing_dense!(out, msgs::BPMessages, state::TensorNetworkState, v, backend, allocator)
+    nbrs = neighbors(state, v)
+    d = length(nbrs)
+    T = state[v]
+    p = dim(space(T, 1))
+    Dk = [dim(virtualspace(state, DirectedEdge(v, n))) for n in nbrs]
+    A = reshape(_only_block(T), (p, Dk...))               # drop oneunit-padded legs
+    M = [_only_block(msgs[DirectedEdge(n, v)]) for n in nbrs]
+    Madj = [_only_block(msgs[DirectedEdge(n, v)]') for n in nbrs]   # adjoint blocks (uniform getindex)
+    base = collect(2:(d + 1))                              # leg ℓ initially at axis ℓ+1
+
+    cp = allocator_checkpoint!(allocator)
+    # Ket prefix chain: Kpre[k] carries messages on legs 1..k-1 (heap-resident),
+    # each with its own leg→axis layout `legpre[k]`.
+    Kpre = Vector{typeof(A)}(undef, d)
+    legpre = Vector{Vector{Int}}(undef, d)
+    Kpre[1] = A
+    legpre[1] = base
+    for j in 2:d
+        Kpre[j], legpre[j] = _absorb_ll(Kpre[j - 1], M[j - 1], j - 1, legpre[j - 1], backend, allocator)
+    end
+
+    # Sweep k = d..1, rolling the bra suffix (messages on legs k+1..d, adjointed).
+    Ks = A
+    legS = copy(base)
+    for k in d:-1:1
+        fs = only(fusiontrees(out[k]))
+        _close_ll!(out[k][fs...], Kpre[k], legpre[k], Ks, legS, k, backend, allocator)
+        if k > 1
+            Ks, legS = _absorb_ll(Ks, Madj[k], k, legS, backend, allocator)
+        end
+    end
+    allocator_reset!(allocator, cp)
+    return out
 end
 
 # Reference path: the obvious per-output loop over the existing single-edge
