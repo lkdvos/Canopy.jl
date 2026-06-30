@@ -34,4 +34,4 @@ makedocs(;
     doctest = false,
 )
 
-deploydocs(; repo = "github.com/lkdvos/Canopy.git", push_preview = true)
+deploydocs(; repo = "github.com/lkdvos/Canopy.jl.git", push_preview = true)

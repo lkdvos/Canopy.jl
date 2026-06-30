@@ -3,44 +3,28 @@
 #
 #   <op>_v ≈ <ψ|op_v|ψ> / <ψ|ψ>
 #
-# evaluated by closing the local environment at v (or the bond environment at
-# edge e) with the converged BP messages.
-#
-# Contraction conventions follow `messages.jl`:
-#   * The TensorMap at vertex v has codomain = physical space `P` and domain =
-#     `V_1 ⊗ ... ⊗ V_d` matching `state.adjacency[v]`.
-#   * Incoming messages `m_{w→v}` live on v's side of the shared edge in
-#     `V_k ← V_k`.
-#   * Single-body `op` must have space `P ← P`.
-#   * Two-body `op_e` must have space `(P_u ⊗ P_v) ← (P_u ⊗ P_v)`.
+# evaluated by closing the local environment at v (or the bond environment at edge e) with the converged BP messages.
 
 @doc """
     reduced_density_matrix(sites, state, messages) -> TensorMap
 
 Bethe-approximated reduced density matrix on a path of vertices `sites`.
-Each site contributes its ket tensor and its bra conjugate; bonds between two
-consecutive sites are contracted directly (ket–ket, bra–bra), and every bond
-crossing the boundary is closed with the BP message arriving at the inside
-site from the outside neighbor.
 
 `sites` must form a *path* in the graph: all vertices must be distinct and
 every consecutive pair `(sites[i], sites[i+1])` must be an edge of `state`.
 
-Returns a `TensorMap` with space
-`(P_{v_1} ⊗ … ⊗ P_{v_n}) ← (P_{v_1} ⊗ … ⊗ P_{v_n})`, where
-`P_{v_i} = physicalspace(state, sites[i])`. The result is **unnormalized**:
-`tr(ρ) ≈ <ψ|ψ>_Bethe` on the region. Divide by `tr(ρ)` for a probability-
-normalized density matrix.
-
-Dispatches internally on `length(sites)` to a single-site, two-site, or
-generic path implementation.
+Returns a `TensorMap` with space `(P_{v_1} ⊗ … ⊗ P_{v_n}) ← (P_{v_1} ⊗ … ⊗ P_{v_n})`,
+where `P_{v_i} = physicalspace(state, sites[i])`.
+The result is **normalized** and **positive definite**: `tr(ρ) ≈ 1` and `isposdef(ρ)` on the region, such that
+expectation values can be computed as `tr(O * ρ)`.
 """ reduced_density_matrix
 
 function reduced_density_matrix(
-        sites::NTuple{1, V}, state::TensorNetworkState, messages::BPMessages,
+        sites::NTuple{1, V}, state::TensorNetworkState, messages::BPMessages;
+        backend = DefaultBackend(), allocator = default_allocator(state),
     ) where {V}
     site = only(sites)
-    Tm = attach_all_messages(state, messages, site)
+    Tm = attach_all_messages(state, messages, site, backend, allocator)
     Td = state[site]'
     tensors = Any[Tm, Td]
     indices = [vcat([-1], 2:numind(Tm)), vcat(2:numind(Td), [-2])]
@@ -49,12 +33,13 @@ function reduced_density_matrix(
 end
 
 function reduced_density_matrix(
-        sites::NTuple{2, V}, state::TensorNetworkState, messages::BPMessages,
+        sites::NTuple{2, V}, state::TensorNetworkState, messages::BPMessages;
+        backend = DefaultBackend(), allocator = default_allocator(state),
     ) where {V}
     has_edge(state, sites...) || error("not implemented")
 
-    T₁ = attach_messages(state, messages, sites[1], incoming_edges(state, sites[1]; exclude=(sites[2],)))
-    T₂ = attach_messages(state, messages, sites[2], incoming_edges(state, sites[2]; exclude=(sites[1],)))
+    T₁ = attach_messages(state, messages, sites[1], incoming_edges(state, sites[1]; exclude = (sites[2],)), backend, allocator)
+    T₂ = attach_messages(state, messages, sites[2], incoming_edges(state, sites[2]; exclude = (sites[1],)), backend, allocator)
     tensors = Any[T₁, T₂, state[sites[1]]', state[sites[2]]']
     indices = [
         vcat([-1], 2:numind(T₁)),
@@ -90,9 +75,9 @@ Bethe-approximated expectation value `⟨ψ|op|ψ⟩ / ⟨ψ|ψ⟩` of `op` over
 `op` must have matching `TensorMap` space — see [`reduced_density_matrix`](@ref)
 for the leg convention.
 """
-expect(state::TensorNetworkState, msgs::BPMessages, op, sites::Tuple) =
-    tr(op * reduced_density_matrix(sites, state, msgs))
-expect(state::TensorNetworkState, msgs::BPMessages, op, v) =
-    expect(state, msgs, op, (v,))
-expect(state::TensorNetworkState, msgs::BPMessages, op, e::UndirectedEdge) =
-    expect(state, msgs, op, (first(e), last(e)))
+expect(state::TensorNetworkState, msgs::BPMessages, op, sites::Tuple; kwargs...) =
+    tr(op * reduced_density_matrix(sites, state, msgs; kwargs...))
+expect(state::TensorNetworkState, msgs::BPMessages, op, v; kwargs...) =
+    expect(state, msgs, op, (v,); kwargs...)
+expect(state::TensorNetworkState, msgs::BPMessages, op, e::UndirectedEdge; kwargs...) =
+    expect(state, msgs, op, (first(e), last(e)); kwargs...)

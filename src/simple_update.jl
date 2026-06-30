@@ -1,13 +1,15 @@
 # --- two-site BP-gauge simple update -----------------------------------------
 function apply!(
         state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 2};
-        trunc = notrunc(), gauge_tol::Real = 0.0, normp::Real = 2, timer = nothing,
-        backend = DefaultBackend(), allocator = _default_allocator(),
+        trunc = notrunc(), gauge_tol::Real = default_gauge_tol(state), normp::Real = 2,
+        timer = nothing, backend = DefaultBackend(), allocator = default_allocator(state),
     )
     return @maybe_timeit timer "apply! 2-site" begin
         _check_compatible(state, gate)
         s₁, s₂ = gate.sites
         G = gate.tensor
+
+        @debug "apply! 2-site entry" sites = gate.sites isempty = buffer_isempty(allocator) stats = buffer_stats(allocator)
 
         # The buffer-allocating steps below are each self-contained: `_absorb_legs`
         # (gauge in / reconstruct) frees its temporaries and resets the buffer, and
@@ -43,24 +45,21 @@ function apply!(
         end
 
         # Apply gate and factorize
-        U, Σ, Vᴴ, ϵ = @maybe_timeit timer "gate+SVD" begin
+        U, Σ, Vᴴ, logλ, ϵ = @maybe_timeit timer "gate+SVD" begin
             @tensor backend = backend allocator = allocator θ[-1 -2; -3 -4] := R₁[-1; 1 2] * R₂[-3; 3 2] * G[-2 -4; 1 3]
-            svd_trunc!(θ; trunc)
+            U, Σ, Vᴴ, ϵ = svd_trunc!(θ; trunc)
+            if iszero(normp)
+                logλ = zero(scalartype(Σ))
+            else
+                α = norm(Σ, normp)
+                logλ = log(α)
+                scale!(Σ, inv(α))
+            end
+            sqrtΣ = sqrt(Σ)
+            rmul!(U, sqrtΣ)
+            lmul!(sqrtΣ, Vᴴ)
+            U, Σ, Vᴴ, logλ, ϵ
         end
-
-        Σdiag = collect(scalartype(msgs), diagview(Σ))
-        T = real(scalartype(state))
-        if normp == 0
-            logλ = zero(T)
-            diagview(Σ) .= sqrt.(diagview(Σ))
-        else
-            α = norm(Σdiag, normp)
-            logλ = log(α)
-            Σdiag ./= α
-            diagview(Σ) .= sqrt.(diagview(Σ) ./ α)
-        end
-        rmul!(U, Σ)
-        lmul!(Σ, Vᴴ)
 
         @maybe_timeit timer "reconstruct" begin
             # Store result in state
@@ -79,35 +78,42 @@ function apply!(
 
         # Bond messages from the new Schmidt diagonal
         V′ = virtualspace(state, DirectedEdge(s₁, s₂))
-        msgs.messages[DirectedEdge(s₂, s₁)] = DiagonalTensorMap(Σdiag, V′)
+        msgs.messages[DirectedEdge(s₂, s₁)] = DiagonalTensorMap(Σ.data, V′)
         V′ᵈ = virtualspace(state, DirectedEdge(s₂, s₁))
-        msgs.messages[DirectedEdge(s₁, s₂)] = DiagonalTensorMap(Σdiag, V′ᵈ)
+        msgs.messages[DirectedEdge(s₁, s₂)] = DiagonalTensorMap(Σ.data, V′ᵈ)
 
+        @debug "apply! 2-site exit" sites = gate.sites isempty = buffer_isempty(allocator) stats = buffer_stats(allocator)
         (state, msgs, (; ϵ, logλ))
     end
 end
 
 # --- helpers -----------------------------------------------------------------
 
+"""
+    default_gauge_tol(x) -> Real
+
+Default eigenvalue floor for the gauge pseudo-inverse in [`_eigh_sqrt`](@ref),
+derived from the scalar type of `x` (a state, messages, or tensor). BP messages
+are normalized, so an absolute floor at `eps^(3/4)` cleanly separates the
+numerical-noise eigenvalues — which must *not* be inverted, or the gauge blows
+up — from physical Schmidt weight. Pass `gauge_tol` to [`apply!`](@ref) to
+override it (e.g. `0` to disable clipping).
+"""
+default_gauge_tol(x) = eps(real(scalartype(x)))^(3 // 4)
+
+safe_sqrt(x, tol::Real) = x > tol ? sqrt(x) : zero(x)
+safe_inv(x) = iszero(x) ? x : inv(x)
+
 # Eigh-based square root and pseudo-inverse of a Hermitian PSD message,
-# clipping eigenvalues below `tol`.
-function _eigh_sqrt(m; tol::Real)
-    @assert tol ≥ 0 "Tolerance must be positive"
+# clipping eigenvalues at or below `tol` (see [`default_gauge_tol`](@ref)).
+function _eigh_sqrt(m; tol::Real = default_gauge_tol(m))
+    @assert tol ≥ 0 "Tolerance must be non-negative"
     D, U = eigh_full(m)
-    λ = diagview(D)
-    λ⁻¹ = similar(λ)
-    z = zero(eltype(λ))
-    @inbounds @simd for i in eachindex(λ)
-        λᵢ = λ[i]
-        if λᵢ > tol
-            λ[i] = sqrt(λᵢ)
-            λ⁻¹[i] = inv(λ[i])
-        else
-            λ⁻¹[i] = λ[i] = z
-        end
-    end
-    Λ = D * U'
-    Λ⁻¹ = rmul!(U, DiagonalTensorMap(λ⁻¹))
+    dD = parent(diagview(D))
+    dD .= safe_sqrt.(dD, tol)
+    Λ = lmul!(D, copy(U'))
+    dD .= safe_inv.(dD)
+    Λ⁻¹ = rmul!(U, D)
     return Λ, Λ⁻¹
 end
 

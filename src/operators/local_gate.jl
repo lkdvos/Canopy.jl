@@ -22,6 +22,8 @@ end
 LocalGate(sites::NTuple{N, V}, tensor::TT) where {T, N, S, V, TT <: AbstractTensorMap{T, S, N, N}} =
     LocalGate{T, N, S, TT, V}(sites, tensor)
 
+Adapt.adapt_structure(to, g::LocalGate) = LocalGate(g.sites, adapt(to, g.tensor))
+
 # Structural checks against `state`: sites exist, gate space matches the
 # physical spaces at those sites, and (for two-site gates) the sites form
 # an existing edge.
@@ -47,6 +49,12 @@ absorbed during normalization. The 2-site method renormalizes the new bond
 message to unit `normp`-norm (kwarg `normp::Real = 2`; `normp = 0` disables
 normalization and returns `logλ = 0`). The 1-site method does not touch any
 bond message and always returns `logλ = 0`.
+
+The 2-site method gauges with the BP messages via an eigh-based square root;
+its pseudo-inverse clips message eigenvalues at or below `gauge_tol::Real`
+(default [`default_gauge_tol`](@ref)`(state)`), which drops numerical-noise
+directions that would otherwise be inverted and blow up the gauge. Pass
+`gauge_tol = 0` to disable clipping.
 """ apply!
 
 # --- single-site -------------------------------------------------------------

@@ -29,6 +29,12 @@ struct TensorNetworkState{T <: Number, S <: IndexSpace, N, A <: DenseVector{T}, 
     end
 end
 
+function TensorNetworkState(
+        adjacency::Dictionary{V, Vector{V}}, vertices::Dictionary{V, StateTensor{T, S, N, A}}
+    ) where {T, S, N, A, V}
+    return TensorNetworkState{T, S, N, A, V}(adjacency, vertices)
+end
+
 # Constructors
 # ------------
 """
@@ -134,6 +140,31 @@ function TensorNetworkState(
     return TensorNetworkState{Float64}(undef, g, P, V)
 end
 
+"""
+    TensorNetworkState{T}(undef, edges::AbstractVector{<:UndirectedEdge}, P::S, V::S)
+    TensorNetworkState(undef, edges::AbstractVector{<:UndirectedEdge}, P::S, V::S)
+
+Convenience constructor for a [`TensorNetworkState`](@ref) on the graph spanned
+by `edges`, with uniform per-vertex physical space `P` and uniform per-edge
+virtual space `V`. Vertices are the endpoints appearing in `edges` (any isolated
+vertices are not represented). Useful together with the lattice constructors
+([`square_lattice`](@ref), [`triangular_lattice`](@ref), [`hexagonal_lattice`](@ref)).
+"""
+function TensorNetworkState{T}(
+        ::UndefInitializer, edges::AbstractVector{<:UndirectedEdge}, P::S, V::S,
+    ) where {T, S <: IndexSpace}
+    vspaces = Dictionary(edges, fill(V, length(edges)))
+    verts = keys(adjacency(keys(vspaces)))
+    pspaces = Dictionary(verts, fill(P, length(verts)))
+    return TensorNetworkState{T}(undef, pspaces, vspaces)
+end
+
+function TensorNetworkState(
+        ::UndefInitializer, edges::AbstractVector{<:UndirectedEdge}, P::S, V::S,
+    ) where {S <: IndexSpace}
+    return TensorNetworkState{Float64}(undef, edges, P, V)
+end
+
 for f! in (:rand!, :randn!)
     @eval begin
         Random.$f!(state::TensorNetworkState) =
@@ -154,6 +185,9 @@ Base.keytype(::Type{TensorNetworkState{T, S, N, A, V}}) where {T, S, N, A, V} = 
 VectorInterface.scalartype(::Type{T}) where {T <: TensorNetworkState} = scalartype(eltype(T))
 TensorKit.storagetype(::Type{T}) where {T <: TensorNetworkState} = storagetype(eltype(T))
 TensorKit.spacetype(::Type{T}) where {T <: TensorNetworkState} = spacetype(eltype(T))
+
+Adapt.adapt_structure(to, state::TensorNetworkState) =
+    TensorNetworkState(state.adjacency, map(adapt(to), state.vertices))
 
 """
     physicalspace(state, vertex) -> S
@@ -283,7 +317,7 @@ Iterator over the directed edges `DirectedEdge(n, site)` for every neighbor
 The result is a lazy generator suitable for `attach_messages`, `map`, and
 `for` loops. Order matches `neighbors(state, site)`.
 """
-function incoming_edges(state::TensorNetworkState, site; exclude=())
+function incoming_edges(state::TensorNetworkState, site; exclude = ())
     return (DirectedEdge(n, site) for n in neighbors(state, site) if !(n in exclude))
 end
 
@@ -293,7 +327,7 @@ end
 Return the 1-based position of `edge` within `neighbors(state, first(edge))`, i.e. the domain-leg index occupied by `edge` in `state[first(edge)]`.
 Throws `ArgumentError` if `edge` is not incident on `first(edge)`.
 """
-function leg_index(state::TensorNetworkState, edge::DirectedEdge)
+function leg_index(state::TensorNetworkState, edge::AbstractEdge)
     idx = findfirst(==(last(edge)), neighbors(state, first(edge)))
     isnothing(idx) && throw(ArgumentError(lazy"edge $edge does not exist"))
     return idx
