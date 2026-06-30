@@ -32,6 +32,7 @@ function apply!(
         logλ = zero(T)
         for gate in gates.gatelist
             state, msgs, info = apply!(state, msgs, gate; timer, allocator, kwargs...)
+            @debug "between gates" sites = gate.sites isempty = buffer_isempty(allocator) stats = buffer_stats(allocator)
             ϵ = max(ϵ, info.ϵ)
             logλ += info.logλ
         end

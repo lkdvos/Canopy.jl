@@ -33,3 +33,19 @@ _default_allocator() = Bumper.default_buffer(Bumper.ResizeBuffer)
 default_allocator(x) = default_allocator(TensorKit.storagetype(x))
 default_allocator(::Type{<:Array}) = _default_allocator()
 default_allocator(::Type{<:DenseVector}) = DefaultAllocator()
+
+# --- buffer introspection (debug only) ---------------------------------------
+# Used by the `@debug` memory-churn checks in `apply!` / `belief_propagation`. The
+# generic fallbacks make these no-ops for allocators whose internals we don't track
+# (e.g. the GPU `DefaultAllocator`), so the call sites stay allocator-agnostic.
+
+# Allocation-state snapshot of a Bumper `ResizeBuffer`, in bytes. `nothing` otherwise.
+buffer_stats(buf::Bumper.ResizeBuffer) =
+    (; capacity = Int(buf.buf_len), used = Int(buf.offset),
+        peak = Int(buf.max_offset), noverflow = length(buf.overflow))
+buffer_stats(::Any) = nothing
+
+# A `ResizeBuffer` is "empty" — all temporaries freed — when the bump offset is back to
+# zero and no heap overflow blocks are live. Vacuously true for other allocators.
+buffer_isempty(buf::Bumper.ResizeBuffer) = iszero(buf.offset) && isempty(buf.overflow)
+buffer_isempty(::Any) = true

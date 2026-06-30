@@ -9,6 +9,8 @@ function apply!(
         s₁, s₂ = gate.sites
         G = gate.tensor
 
+        @debug "apply! 2-site entry" sites = gate.sites isempty = buffer_isempty(allocator) stats = buffer_stats(allocator)
+
         # The buffer-allocating steps below are each self-contained: `_absorb_legs`
         # (gauge in / reconstruct) frees its temporaries and resets the buffer, and
         # the `@tensor` gate contraction does the same automatically. The new site
@@ -80,6 +82,7 @@ function apply!(
         V′ᵈ = virtualspace(state, DirectedEdge(s₂, s₁))
         msgs.messages[DirectedEdge(s₁, s₂)] = DiagonalTensorMap(Σ.data, V′ᵈ)
 
+        @debug "apply! 2-site exit" sites = gate.sites isempty = buffer_isempty(allocator) stats = buffer_stats(allocator)
         (state, msgs, (; ϵ, logλ))
     end
 end

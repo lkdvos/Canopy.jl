@@ -184,6 +184,7 @@ function update_messages!(
         end
         insert!(new_dict, edge, new_msg)
         state.residuals[edge] = tr_distance(old[edge], new_msg; is_hermitian = true)
+        @debug "between messages" edge = edge isempty = buffer_isempty(alg.allocator) stats = buffer_stats(alg.allocator)
     end
     state.iterate = BPMessages(new_dict)
     return state
@@ -315,7 +316,10 @@ function belief_propagation(
     stopping = AI.StopAfterIteration(maxiter)
     tol > 0 && (stopping = stopping | StopWhenStable(tol))
     alg = BeliefPropagation(stopping; schedule, timer, backend, allocator)
+    @debug "belief_propagation entry" isempty = buffer_isempty(allocator) stats = buffer_stats(allocator) gc_live_bytes = Base.gc_live_bytes() maxrss = Sys.maxrss()
     return @maybe_timeit timer "belief_propagation" begin
-        AI.solve(BPProblem(state), alg; messages)
+        res = AI.solve(BPProblem(state), alg; messages)
+        @debug "belief_propagation exit" isempty = buffer_isempty(allocator) stats = buffer_stats(allocator) gc_live_bytes = Base.gc_live_bytes() maxrss = Sys.maxrss()
+        res
     end
 end
