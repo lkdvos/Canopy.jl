@@ -284,6 +284,103 @@ function compute_message!(
 end
 
 """
+    compute_outgoing_messages(msgs, state, v, backend, allocator) -> Vector{MessageTensor}
+    compute_outgoing_messages!(out, msgs, state, v, backend, allocator) -> out
+
+Compute *every* outgoing BP message from vertex `v` at once: one message per
+neighbor `n`, along `DirectedEdge(v, n)`. The `d = degree(state, v)` outputs all
+derive from the same `state[v]`, `state[v]'`, and the same set of incoming
+messages, so computing them together shares work and improves data locality.
+
+The result is a `Vector{MessageTensor}` in **neighbor order**: `out[k]` is the
+message along `DirectedEdge(v, neighbors(state, v)[k])`, with space `V_n ← V_n`
+where `V_n = virtualspace(state, DirectedEdge(n, v))` (receiver `n`'s side, as in
+[`compute_message`](@ref)). Map an output back to its edge via
+`neighbors(state, v)`.
+
+Like [`compute_message`](@ref), neither variant mutates `msgs` nor performs
+trace normalization / hermitian projection — callers normalise the returned
+messages. `compute_outgoing_messages` allocates the output vector;
+`compute_outgoing_messages!` fills `out`, whose `k`-th entry must already have
+space `V_n ← V_n` for `n = neighbors(state, v)[k]`.
+"""
+function compute_outgoing_messages(
+        msgs::BPMessages, state::TensorNetworkState, v,
+        backend = DefaultBackend(), allocator = default_allocator(state),
+    )
+    TT = MessageTensor{scalartype(state), spacetype(state), TensorKit.storagetype(state)}
+    out = map(neighbors(state, v)) do n
+        V_n = virtualspace(state, DirectedEdge(n, v))
+        return TT(undef, V_n ← V_n)
+    end
+    return compute_outgoing_messages!(out, msgs, state, v, backend, allocator)
+end
+
+function compute_outgoing_messages!(
+        out, msgs::BPMessages, state::TensorNetworkState, v,
+        backend = DefaultBackend(), allocator = default_allocator(state),
+    )
+    return _outgoing_doublelayer!(out, msgs, state, v, backend, allocator)
+end
+
+# Reference path: the obvious per-output loop over the existing single-edge
+# kernel. Fermion-trivially correct (it *is* `compute_message!`, batched) and
+# used as the golden oracle for the optimized double-layer path.
+function _outgoing_naive!(out, msgs::BPMessages, state::TensorNetworkState, v, backend, allocator)
+    for (k, n) in enumerate(neighbors(state, v))
+        compute_message!(out[k], msgs, state, DirectedEdge(v, n), backend, allocator)
+    end
+    return out
+end
+
+# Double-layer leave-one-out. The message `v→nbrs[k]` needs incoming messages on
+# every leg except `k`. We share that work across the `d` outputs with a ket
+# *prefix* chain and a bra *suffix* chain:
+#
+#   Kpre[k] = state[v] with messages on legs 1..k-1 absorbed   (ket)
+#   Ks      = state[v] with messages on legs k+1..d absorbed   (bra, via conjB)
+#
+# and close `Kpre[k]` against `Ks` (physical + all legs ≠ k traced) exactly as
+# `compute_message!` closes `Tm` against the bra. Each incoming message is then
+# absorbed only twice (2(d-1) absorptions vs the naive d(d-1)).
+#
+# The suffix is built on a ket-shaped tensor (so the verified `_mul_leg!` path
+# applies and twists are inherited, not re-derived), absorbing the *adjoint*
+# message `m†`: with the closing's `conjB=true`, this reproduces the sandwich
+# `Σ T·mⱼ·conj(T)` that `compute_message!` produces with `mⱼ` on the ket — see
+# the scalar identity `mⱼ[i,j'] = conj(mⱼ†[j',i])`.
+function _outgoing_doublelayer!(out, msgs::BPMessages, state::TensorNetworkState, v, backend, allocator)
+    nbrs = neighbors(state, v)
+    d = length(nbrs)
+    T = state[v]
+    N = numind(T)
+    m = [msgs[DirectedEdge(n, v)] for n in nbrs]   # incoming message on each leg
+
+    # Ket prefix chain: Kpre[k] carries messages on legs 1..k-1.
+    Kpre = Vector{typeof(T)}(undef, d)
+    Kpre[1] = T
+    for j in 2:d
+        Kpre[j] = _absorb_legs(Kpre[j - 1], (j - 1 => m[j - 1],), backend, allocator)
+    end
+
+    # Sweep k = d..1, rolling the bra suffix Ks (messages on legs k+1..d).
+    Ks = T
+    for k in d:-1:1
+        tc = k + 1
+        cA = TupleTools.deleteat(ntuple(identity, N), tc)
+        pA = ((tc,), cA)
+        pB = (cA, (tc,))
+        cp = allocator_checkpoint!(allocator)
+        tensorcontract!(out[k], Kpre[k], pA, false, Ks, pB, true, ((2,), (1,)), One(), Zero(), backend, allocator)
+        allocator_reset!(allocator, cp)
+        if k > 1
+            Ks = _absorb_legs(Ks, (k => copy(m[k]'),), backend, allocator)
+        end
+    end
+    return out
+end
+
+"""
     tr_distance(A, B; p=1, is_hermitian=false) -> Real
     tr_distance!(A, B; p=1, is_hermitian=false) -> Real
 
