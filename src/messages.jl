@@ -289,18 +289,17 @@ end
 
 Compute *every* outgoing BP message from vertex `v` at once: one message per
 neighbor `n`, along `DirectedEdge(v, n)`. The `d = degree(state, v)` outputs all
-derive from the same `state[v]`, `state[v]'`, and the same set of incoming
-messages, so computing them together shares work and improves data locality.
+derive from the same `state[v]` and incoming messages, so computing them together
+shares work via a leave-one-out sweep.
 
 The result is a `Vector{MessageTensor}` in **neighbor order**: `out[k]` is the
 message along `DirectedEdge(v, neighbors(state, v)[k])`, with space `V_n ← V_n`
 where `V_n = virtualspace(state, DirectedEdge(n, v))` (receiver `n`'s side, as in
-[`compute_message`](@ref)). Map an output back to its edge via
-`neighbors(state, v)`.
+[`compute_message`](@ref)).
 
-Like [`compute_message`](@ref), neither variant mutates `msgs` nor performs
-trace normalization / hermitian projection — callers normalise the returned
-messages. `compute_outgoing_messages` allocates the output vector;
+Like [`compute_message`](@ref), neither variant mutates `msgs` nor performs trace
+normalization / hermitian projection — callers normalise the returned messages.
+`compute_outgoing_messages` allocates the output vector;
 `compute_outgoing_messages!` fills `out`, whose `k`-th entry must already have
 space `V_n ← V_n` for `n = neighbors(state, v)[k]`.
 """
@@ -316,152 +315,46 @@ function compute_outgoing_messages(
     return compute_outgoing_messages!(out, msgs, state, v, backend, allocator)
 end
 
+# Double-layer leave-one-out. The message `v→nbrs[k]` needs the incoming messages
+# on every leg except `k`. We share that across the `d` outputs with a ket prefix
+# chain `Kpre[k]` (messages on legs 1..k-1 absorbed) and a rolling bra suffix `Ks`
+# (legs k+1..d absorbed, via `conjB=true`), each closed exactly as
+# `compute_message!` closes `Tm` against its bra — 2(d-1) absorptions vs d(d-1).
+# The suffix absorbs the *adjoint* message `m†` so the `conjB=true` closing
+# reproduces the same sandwich `compute_message!` builds with `m` on the ket.
 function compute_outgoing_messages!(
         out, msgs::BPMessages, state::TensorNetworkState, v,
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
-    if sectortype(spacetype(state)) === Trivial
-        return _outgoing_dense!(out, msgs, state, v, backend, allocator)
-    else
-        return _outgoing_doublelayer!(out, msgs, state, v, backend, allocator)
-    end
-end
-
-# --- dense (Trivial-sector) contiguity-optimized path -------------------------
-# For a Trivial sector the on-site tensor is a single fusion-tree block, so we
-# run the double-layer leave-one-out on plain arrays with explicit
-# `permutedims`/BLAS, controlling the TTGT transposes directly (physical leg kept
-# as the leading contiguous axis). Data is extracted via fusion-tree getindex
-# `t[f₁,f₂]` (the storage basis `_mul_leg!` uses — uniform for `TensorMap` and
-# `AdjointTensorMap`, so duals need no special handling). This is the dense core
-# the symmetric path would reuse per fusion-tree block.
-
-# Block of a single-fusiontree-pair tensor in storage basis (the basis the
-# verified kernels contract in; uniform for `TensorMap`/`AdjointTensorMap`).
-_only_block(t) = (fs = only(fusiontrees(t)); Array(t[fs...]))
-
-# Absorb message-matrix `m` into virtual leg `ℓ` of dense block `W`, whose virtual
-# legs sit at axes `legaxis` (physical leg fixed at axis 1). The new leg is left
-# at the *last* axis rather than restored to `ℓ`'s old slot: the `pAB` restore is
-# a full extra transpose pass (~2.3× the cost of the absorption), and leaving the
-# leg last avoids it. Returns the new block and its updated leg→axis map.
-function _absorb_ll(W, m::AbstractMatrix, ℓ::Int, legaxis, backend, allocator)
-    M = ndims(W)
-    ax = legaxis[ℓ]
-    oindA = TupleTools.deleteat(ntuple(identity, M), ax)
-    C = similar(W, ntuple(i -> i < M ? size(W, oindA[i]) : size(W, ax), M))
-    # output order = (oindA..., new leg) ⇒ new leg last, no restore transpose
-    tensorcontract!(C, W, (oindA, (ax,)), false, m, ((2,), (1,)), false,
-        (ntuple(identity, M), ()), One(), Zero(), backend, allocator)
-    newaxis = [a == ax ? M : (a > ax ? a - 1 : a) for a in legaxis]
-    return C, newaxis
-end
-
-# Close ket block `K` (legs at `legK`) against bra block `S` (legs at `legS`) over
-# the physical leg + every virtual leg except `k`, writing the message into
-# `out_mat`. The contracted legs are listed in matching order on both sides;
-# `conjB=true` and the `((2,),(1,))` output (codomain = bra) mirror
-# `compute_message!`'s closing.
-function _close_ll!(out_mat, K, legK, S, legS, k::Int, backend, allocator)
-    d = length(legK)
-    others = (ℓ for ℓ in 1:d if ℓ != k)
-    contK = (1, (legK[ℓ] for ℓ in others)...)
-    contS = (1, (legS[ℓ] for ℓ in others)...)
-    pA = ((legK[k],), contK)
-    pB = (contS, (legS[k],))
-    tensorcontract!(out_mat, K, pA, false, S, pB, true, ((2,), (1,)), One(), Zero(), backend, allocator)
-    return out_mat
-end
-
-function _outgoing_dense!(out, msgs::BPMessages, state::TensorNetworkState, v, backend, allocator)
-    nbrs = neighbors(state, v)
-    d = length(nbrs)
-    T = state[v]
-    p = dim(space(T, 1))
-    Dk = [dim(virtualspace(state, DirectedEdge(v, n))) for n in nbrs]
-    A = reshape(_only_block(T), (p, Dk...))               # drop oneunit-padded legs
-    M = [_only_block(msgs[DirectedEdge(n, v)]) for n in nbrs]
-    Madj = [_only_block(msgs[DirectedEdge(n, v)]') for n in nbrs]   # adjoint blocks (uniform getindex)
-    base = collect(2:(d + 1))                              # leg ℓ initially at axis ℓ+1
-
-    cp = allocator_checkpoint!(allocator)
-    # Ket prefix chain: Kpre[k] carries messages on legs 1..k-1 (heap-resident),
-    # each with its own leg→axis layout `legpre[k]`.
-    Kpre = Vector{typeof(A)}(undef, d)
-    legpre = Vector{Vector{Int}}(undef, d)
-    Kpre[1] = A
-    legpre[1] = base
-    for j in 2:d
-        Kpre[j], legpre[j] = _absorb_ll(Kpre[j - 1], M[j - 1], j - 1, legpre[j - 1], backend, allocator)
-    end
-
-    # Sweep k = d..1, rolling the bra suffix (messages on legs k+1..d, adjointed).
-    Ks = A
-    legS = copy(base)
-    for k in d:-1:1
-        fs = only(fusiontrees(out[k]))
-        _close_ll!(out[k][fs...], Kpre[k], legpre[k], Ks, legS, k, backend, allocator)
-        if k > 1
-            Ks, legS = _absorb_ll(Ks, Madj[k], k, legS, backend, allocator)
-        end
-    end
-    allocator_reset!(allocator, cp)
-    return out
-end
-
-# Reference path: the obvious per-output loop over the existing single-edge
-# kernel. Fermion-trivially correct (it *is* `compute_message!`, batched) and
-# used as the golden oracle for the optimized double-layer path.
-function _outgoing_naive!(out, msgs::BPMessages, state::TensorNetworkState, v, backend, allocator)
-    for (k, n) in enumerate(neighbors(state, v))
-        compute_message!(out[k], msgs, state, DirectedEdge(v, n), backend, allocator)
-    end
-    return out
-end
-
-# Double-layer leave-one-out. The message `v→nbrs[k]` needs incoming messages on
-# every leg except `k`. We share that work across the `d` outputs with a ket
-# *prefix* chain and a bra *suffix* chain:
-#
-#   Kpre[k] = state[v] with messages on legs 1..k-1 absorbed   (ket)
-#   Ks      = state[v] with messages on legs k+1..d absorbed   (bra, via conjB)
-#
-# and close `Kpre[k]` against `Ks` (physical + all legs ≠ k traced) exactly as
-# `compute_message!` closes `Tm` against the bra. Each incoming message is then
-# absorbed only twice (2(d-1) absorptions vs the naive d(d-1)).
-#
-# The suffix is built on a ket-shaped tensor (so the verified `_mul_leg!` path
-# applies and twists are inherited, not re-derived), absorbing the *adjoint*
-# message `m†`: with the closing's `conjB=true`, this reproduces the sandwich
-# `Σ T·mⱼ·conj(T)` that `compute_message!` produces with `mⱼ` on the ket — see
-# the scalar identity `mⱼ[i,j'] = conj(mⱼ†[j',i])`.
-function _outgoing_doublelayer!(out, msgs::BPMessages, state::TensorNetworkState, v, backend, allocator)
     nbrs = neighbors(state, v)
     d = length(nbrs)
     T = state[v]
     N = numind(T)
-    m = [msgs[DirectedEdge(n, v)] for n in nbrs]   # incoming message on each leg
+    m = [msgs[DirectedEdge(n, v)] for n in nbrs]
 
-    # Ket prefix chain: Kpre[k] carries messages on legs 1..k-1.
     Kpre = Vector{typeof(T)}(undef, d)
     Kpre[1] = T
     for j in 2:d
         Kpre[j] = _absorb_legs(Kpre[j - 1], (j - 1 => m[j - 1],), backend, allocator)
     end
 
-    # Sweep k = d..1, rolling the bra suffix Ks (messages on legs k+1..d).
     Ks = T
     for k in d:-1:1
         tc = k + 1
         cA = TupleTools.deleteat(ntuple(identity, N), tc)
-        pA = ((tc,), cA)
-        pB = (cA, (tc,))
         cp = allocator_checkpoint!(allocator)
-        tensorcontract!(out[k], Kpre[k], pA, false, Ks, pB, true, ((2,), (1,)), One(), Zero(), backend, allocator)
+        tensorcontract!(out[k], Kpre[k], ((tc,), cA), false, Ks, (cA, (tc,)), true,
+            ((2,), (1,)), One(), Zero(), backend, allocator)
         allocator_reset!(allocator, cp)
-        if k > 1
-            Ks = _absorb_legs(Ks, (k => copy(m[k]'),), backend, allocator)
-        end
+        k > 1 && (Ks = _absorb_legs(Ks, (k => copy(m[k]'),), backend, allocator))
+    end
+    return out
+end
+
+# Reference per-output loop over the single-edge kernel; the golden test oracle.
+function _outgoing_naive!(out, msgs::BPMessages, state::TensorNetworkState, v, backend, allocator)
+    for (k, n) in enumerate(neighbors(state, v))
+        compute_message!(out[k], msgs, state, DirectedEdge(v, n), backend, allocator)
     end
     return out
 end
