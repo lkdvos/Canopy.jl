@@ -39,6 +39,9 @@ export product_state
 include("utility.jl")
 include("messages.jl")
 include("beliefpropagation.jl")
+include("schedules/synchronous.jl")
+include("schedules/spanning_tree.jl")
+include("schedules/residual.jl")
 
 include("expect.jl")
 export expect
