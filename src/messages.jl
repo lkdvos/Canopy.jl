@@ -112,6 +112,10 @@ Base.getindex(msgs::BPMessages, key) = getindex(msgs.messages, key)
 
 Base.length(msgs::BPMessages) = length(msgs.messages)
 
+# Deep snapshot: copies every message `TensorMap` so mutating one container does
+# not touch the other. Used by schedules that keep a `last_used` snapshot.
+Base.copy(msgs::BPMessages) = BPMessages(map(copy, msgs.messages))
+
 # --- compatibility check ------------------------------------------------------
 """
     check_consistency(state, messages) -> Bool
