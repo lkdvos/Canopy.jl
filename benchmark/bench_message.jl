@@ -5,6 +5,7 @@
 # is the kernel-improvement signal to watch.
 
 using Canopy: compute_message, compute_message!
+using Canopy: compute_outgoing_messages, compute_outgoing_messages!
 
 for (L, Dmax) in [(8, 4), (16, 8), (32, 16)]
     SUITE["message"]["ring", L, Dmax] = @benchmarkable(
@@ -28,3 +29,18 @@ SUITE["message"]["ring", 16, 8, :inplace] = @benchmarkable(
         out = similar(msgs[edge])
     ),
 )
+
+# Vertex-centric kernel: all outgoing messages from one (degree-4 interior)
+# vertex of a square lattice, in place. Scaling with `Dmax` is the signal to
+# watch; compare against `d ×` the single-edge `message` benchmarks above.
+for Dmax in [8, 16, 32]
+    SUITE["message"]["square_vertex", Dmax] = @benchmarkable(
+        compute_outgoing_messages!(out, msgs, state, v),
+        setup = (
+            state = square_state(5, 5, $Dmax);
+            msgs = warm_messages(state);
+            v = 13;                          # interior (degree-4) vertex of grid([5, 5])
+            out = compute_outgoing_messages(msgs, state, v)
+        ),
+    )
+end

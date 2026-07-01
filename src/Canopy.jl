@@ -18,6 +18,7 @@ using AlgorithmsInterface: StopAfter
 using TensorKit
 using TensorKit: TupleTools
 using TensorKit.TO: tensorcontract, tensorcontract!, tensoralloc, tensoralloc_contract, tensorfree!, promote_contract
+using TensorKit.TO: tensoradd!, tensoralloc_add
 using TensorKit.TO: DefaultBackend, DefaultAllocator, allocator_checkpoint!, allocator_reset!
 using MatrixAlgebraKit: diagview, eigh_full, eigh_vals!, qr_compact, svd_trunc, svd_vals!, truncrank, trunctol
 using TimerOutputs: TimerOutput, @timeit

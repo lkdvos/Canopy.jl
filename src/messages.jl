@@ -284,6 +284,129 @@ function compute_message!(
 end
 
 """
+    compute_message(msgs, state, edges::AbstractVector{<:DirectedEdge}) -> Vector{MessageTensor}
+    compute_message!(out, msgs, state, edges::AbstractVector{<:DirectedEdge}) -> out
+
+Compute the updated BP messages along several `edges` that all leave the **same**
+source vertex `v = first(first(edges))`, sharing work across them. Every edge must
+satisfy `first(e) == v`; the targets `last(e)` may be any subset of `v`'s
+neighbors, in any order (e.g. `outgoing_edges(state, v)` for all of them).
+`out[i]` is the message along `edges[i]`, with the same space the single-edge
+[`compute_message`](@ref) produces.
+
+All messages out of `v` close `state[v]` against `state[v]'` with the same
+incoming messages absorbed leave-one-out. A ket prefix chain and a bra suffix
+chain share those absorptions (each incoming message absorbed about twice in
+total rather than once per output); only the chain segments spanning the
+requested targets are built, so a small subset costs proportionally less. Like
+the single-edge method, neither variant mutates `msgs` nor normalises the result;
+`compute_message` allocates the output vector, `compute_message!` fills `out`.
+"""
+function compute_message(
+        msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
+        backend = DefaultBackend(), allocator = default_allocator(state),
+    )
+    out = map(e -> similar(msgs[e]), edges)
+    return compute_message!(out, msgs, state, edges, backend, allocator)
+end
+
+# Chain links carry their leg ids (`1` = physical, `2:M` = virtual leg `id-1`) in
+# axis order, the first `ncod` forming the codomain. `_absorb` contracts `msg` into
+# leg `absorbed` of `link` and re-emits it directly in the target order/partition
+# `(newlegs, ncod)`, folding the reorder and codomain/domain split into the
+# contraction's one output pass so the active leg stays matrix-form for the next
+# step. `_repartition` does the same for a bare on-site tensor (native order, no msg).
+function _absorb(link, legs, absorbed::Int, msg, newlegs, ncod::Int, backend, allocator)
+    M = numind(link)
+    ax = findfirst(==(absorbed), legs)
+    kept = TupleTools.deleteat(ntuple(identity, M), ax)
+    order = (ntuple(i -> legs[kept[i]], M - 1)..., absorbed)   # pairwise-output leg ids
+    pA = (kept, (ax,))
+    pB = ((2,), (1,))
+    pAB = (
+        ntuple(i -> findfirst(==(newlegs[i]), order), ncod),
+        ntuple(i -> findfirst(==(newlegs[ncod + i]), order), M - ncod),
+    )
+    TC = promote_contract(scalartype(link), scalartype(msg))
+    result = tensoralloc_contract(TC, link, pA, false, msg, pB, false, pAB, Val(true), allocator)
+    cp = allocator_checkpoint!(allocator)
+    tensorcontract!(result, link, pA, false, msg, pB, false, pAB, One(), Zero(), backend, allocator)
+    allocator_reset!(allocator, cp)
+    return result
+end
+
+function _repartition(tensor, newlegs, ncod::Int, backend, allocator)
+    M = numind(tensor)
+    pC = (ntuple(i -> newlegs[i], ncod), ntuple(i -> newlegs[ncod + i], M - ncod))
+    result = tensoralloc_add(scalartype(tensor), tensor, pC, false, Val(true), allocator)
+    cp = allocator_checkpoint!(allocator)
+    tensoradd!(result, tensor, pC, false, One(), Zero(), backend, allocator)
+    allocator_reset!(allocator, cp)
+    return result
+end
+
+# Shared leave-one-out: `prefix[k]` absorbs virtual legs 1..k-1, `suffix[k]`
+# absorbs k+1..d (adjoint messages), and the closing contracts them over the
+# physical leg and every virtual leg ≠ k — the `compute_message!` sandwich. Links
+# are pre-partitioned so each closing is a direct block GEMM with no repartition,
+# and bump-allocated under one checkpoint freed at the end. Only the prefix up to
+# the largest target and the suffix down to the smallest are built, so a clustered
+# subset costs proportionally less than all `d` outputs.
+function compute_message!(
+        out, msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
+        backend = DefaultBackend(), allocator = default_allocator(state),
+    )
+    isempty(edges) && return out
+    v = first(first(edges))
+    T = state[v]
+    M = numind(T)
+    nbrs = neighbors(state, v)
+    d = length(nbrs)
+    target_legs = map(edges) do e
+        first(e) == v || throw(ArgumentError(lazy"edge $e does not leave the shared source $v"))
+        return leg_index(state, e)
+    end
+    legmin, legmax = extrema(target_legs)
+    incoming = map(n -> msgs[DirectedEdge(n, v)], nbrs)
+    others(k) = TupleTools.deleteat(ntuple(identity, M), k + 1)   # every leg except target k
+    prefix_legs(k) = (k + 1, others(k)...)                        # open leg k+1 alone in codomain
+    suffix_legs(k) = (others(k)..., k + 1)                        # open leg k+1 alone in domain
+
+    cp = allocator_checkpoint!(allocator)
+
+    # ket prefix chain (built up to the largest target). The link type is read off
+    # the first link, so the container is concrete and GPU-portable.
+    prefix1 = _repartition(T, prefix_legs(1), 1, backend, allocator)
+    prefix = Vector{typeof(prefix1)}(undef, d)
+    prefix[1] = prefix1
+    for k in 2:legmax
+        prefix[k] = _absorb(prefix[k - 1], prefix_legs(k - 1), k, incoming[k - 1], prefix_legs(k), 1, backend, allocator)
+    end
+
+    # bra suffix chain (built down to the smallest target, adjoint messages)
+    suffixd = _repartition(T, suffix_legs(d), M - 1, backend, allocator)
+    suffix = Vector{typeof(suffixd)}(undef, d)
+    suffix[d] = suffixd
+    for k in (d - 1):-1:legmin
+        suffix[k] = _absorb(suffix[k + 1], suffix_legs(k + 1), k + 2, incoming[k + 1]', suffix_legs(k), M - 1, backend, allocator)
+    end
+
+    pA = ((1,), ntuple(i -> i + 1, M - 1))
+    pB = (ntuple(identity, M - 1), (M,))
+    for (i, k) in enumerate(target_legs)
+        cp_close = allocator_checkpoint!(allocator)
+        tensorcontract!(
+            out[i], prefix[k], pA, false, suffix[k], pB, true,
+            ((2,), (1,)), One(), Zero(), backend, allocator
+        )
+        allocator_reset!(allocator, cp_close)
+    end
+
+    allocator_reset!(allocator, cp)
+    return out
+end
+
+"""
     tr_distance(A, B; p=1, is_hermitian=false) -> Real
     tr_distance!(A, B; p=1, is_hermitian=false) -> Real
 
