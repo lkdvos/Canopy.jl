@@ -322,6 +322,19 @@ function incoming_edges(state::TensorNetworkState, site; exclude = ())
 end
 
 """
+    outgoing_edges(state, site; exclude=()) -> generator
+
+Iterator over the directed edges `DirectedEdge(site, n)` for every neighbor
+`n` of `site` in `state`, optionally skipping any neighbor present in
+`exclude`. The reverse of [`incoming_edges`](@ref); order matches
+`neighbors(state, site)`. `collect` it to pass to the vector form of
+[`compute_message`](@ref).
+"""
+function outgoing_edges(state::TensorNetworkState, site; exclude = ())
+    return (DirectedEdge(site, n) for n in neighbors(state, site) if !(n in exclude))
+end
+
+"""
     leg_index(state, edge) -> Int
 
 Return the 1-based position of `edge` within `neighbors(state, first(edge))`, i.e. the domain-leg index occupied by `edge` in `state[first(edge)]`.
