@@ -1,6 +1,6 @@
 using Canopy
 using Canopy: DirectedEdge, belief_propagation, check_consistency, tr_distance
-using Canopy: SpanningTreeSchedule, ResidualSchedule, GreedySampler, WeightedSampler
+using Canopy: SpanningTreeSchedule, ResidualSchedule, ResidualSplashSchedule, GreedySampler, WeightedSampler
 using Canopy: random_spanning_tree
 using TensorKit
 using Graphs
@@ -96,11 +96,12 @@ end
 # they should converge to the same messages (up to per-edge scale, which
 # `tr_distance` quotients out) as the synchronous default.
 @testset "BP schedules agree with the synchronous fixed point" begin
-    schedules(ndir) = (
+    schedules(ndir, nv) = (
         "spanning_tree" => SpanningTreeSchedule(; rng = MersenneTwister(0)),
         "residual_full" => ResidualSchedule(GreedySampler(ndir)),
         "residual_half" => ResidualSchedule(GreedySampler(cld(ndir, 2))),
         "residual_weighted" => ResidualSchedule(WeightedSampler(ndir; rng = MersenneTwister(0))),
+        "residual_splash" => ResidualSplashSchedule(height = nv),
     )
     @testset "$name graph" for (name, graph) in
             ("ring" => cycle_graph(8), "tree" => path_graph(6), "grid" => grid([3, 3]))
@@ -108,8 +109,9 @@ end
         state = TensorNetworkState{ComplexF64}(undef, graph, ComplexSpace(2), ComplexSpace(3))
         randn!(state)
         ndir = length(BPMessages(state).messages)
+        nv = length(vertices(state))
         ref = belief_propagation(BPMessages(state), state; maxiter = 500, tol = 1.0e-12)
-        @testset "$sname" for (sname, sched) in schedules(ndir)
+        @testset "$sname" for (sname, sched) in schedules(ndir, nv)
             msgs = belief_propagation(
                 BPMessages(state), state; maxiter = 5000, tol = 1.0e-11, schedule = sched,
             )
@@ -117,4 +119,38 @@ end
             @test max_msg_distance(msgs, ref) < 1.0e-6
         end
     end
+end
+
+
+# On a tree, a single splash with height ≥ diameter reaches the exact fixed point
+# for the root's inbound messages. With all residuals seeded to `Inf`, the root is
+# the first vertex in `vertices(state)` order.
+@testset "acyclic one-splash convergence" begin
+    Random.seed!(8)
+    state = TensorNetworkState{ComplexF64}(undef, path_graph(6), ComplexSpace(2), ComplexSpace(3))
+    randn!(state)
+    ref = belief_propagation(BPMessages(state), state; maxiter = 500, tol = 1.0e-12)
+    root = first(vertices(state))
+    msgs = belief_propagation(
+        BPMessages(state), state; maxiter = 1, schedule = ResidualSplashSchedule(height = 6),
+    )
+    @test check_consistency(state, msgs)
+    for k in neighbors(state, root)
+        @test tr_distance(msgs[DirectedEdge(k, root)], ref[DirectedEdge(k, root)]; is_hermitian = true) < 1.0e-8
+    end
+end
+
+
+# A single internal loop must still converge to the synchronous fixed point.
+@testset "single internal loop convergence" begin
+    Random.seed!(9)
+    state = TensorNetworkState{ComplexF64}(undef, cycle_graph(4), ComplexSpace(2), ComplexSpace(3))
+    randn!(state)
+    ref = belief_propagation(BPMessages(state), state; maxiter = 500, tol = 1.0e-12)
+    msgs = belief_propagation(
+        BPMessages(state), state; maxiter = 5000, tol = 1.0e-11,
+        schedule = ResidualSplashSchedule(height = 4),
+    )
+    @test check_consistency(state, msgs)
+    @test max_msg_distance(msgs, ref) < 1.0e-6
 end

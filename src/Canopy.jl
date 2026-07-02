@@ -3,7 +3,7 @@ module Canopy
 export physicalspace, virtualspace
 export reduced_density_matrix
 export TensorNetworkState, BPMessages
-export BPSchedule, SynchronousSchedule, SpanningTreeSchedule, ResidualSchedule
+export BPSchedule, SynchronousSchedule, SpanningTreeSchedule, ResidualSchedule, ResidualSplashSchedule
 export BPSampler, GreedySampler, WeightedSampler
 
 using Dictionaries
@@ -39,6 +39,10 @@ export product_state
 include("utility.jl")
 include("messages.jl")
 include("beliefpropagation.jl")
+include("schedules/synchronous.jl")
+include("schedules/spanning_tree.jl")
+include("schedules/residual.jl")
+include("schedules/residual_splash.jl")
 
 include("expect.jl")
 export expect

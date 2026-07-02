@@ -1,46 +1,3 @@
-struct StopWhenStable <: AI.StoppingCriterion
-    tol::Float64
-end
-
-mutable struct StopWhenStableState <: AI.StoppingCriterionState
-    at_iteration::Int
-    delta::Float64
-end
-
-function AI.initialize_state(::AI.Problem, ::AI.Algorithm, c::StopWhenStable; kwargs...)
-    return StopWhenStableState(-1, NaN)
-end
-
-function AI.initialize_state!(
-        ::AI.Problem, ::AI.Algorithm, stop_when::StopWhenStable, st::StopWhenStableState;
-        kwargs...
-    )
-    st.at_iteration = -1
-    st.delta = NaN
-    return st
-end
-
-function AI.is_finished!(
-        ::AI.Problem, ::AI.Algorithm, state::AI.State, c::StopWhenStable, st::StopWhenStableState
-    )
-    k = state.iteration
-    k == 0 && return false
-
-    st.delta = maximum(values(state.residuals))
-    if st.delta < c.tol
-        st.at_iteration = k
-        return true
-    end
-    return false
-end
-
-function AI.is_finished(
-        ::AI.Problem, ::AI.Algorithm, state::AI.State, c::StopWhenStable, ::StopWhenStableState
-    )
-    state.iteration == 0 && return false
-    return maximum(values(state.residuals)) < c.tol
-end
-
 iterate_difference(previous_iterate, iterate) =
     iterate_difference!(previous_iterate, iterate)
 
@@ -59,4 +16,71 @@ macro maybe_timeit(timer, name, expr)
             @timeit $(esc(timer)) $(esc(name)) $(esc(expr))
         end
     end
+end
+
+# Graph helpers
+# -------------
+
+# Randomized BFS spanning tree over the network's own adjacency. Returns the BFS
+# vertex order (root first), the `parent` map (root absent), and the cotree
+# (loop-closing) undirected edges. Assumes a connected network.
+function random_spanning_tree(state::TensorNetworkState, rng)
+    V = keytype(state)
+    verts = collect(vertices(state))
+    root = rand(rng, verts)
+    parent = Dictionary{V, V}()
+    visited = Set{V}((root,))
+    order = V[root]
+    tree_edges = Set{UndirectedEdge{V}}()
+    head = 1
+    while head <= length(order)
+        v = order[head]
+        head += 1
+        nbrs = collect(neighbors(state, v))
+        Random.shuffle!(rng, nbrs)
+        for n in nbrs
+            n in visited && continue
+            push!(visited, n)
+            insert!(parent, n, v)
+            push!(tree_edges, UndirectedEdge(v, n))
+            push!(order, n)
+        end
+    end
+    cotree = [e for e in edges(state) if !(e in tree_edges)]
+    return order, parent, cotree
+end
+
+# Height-limited BFS from `root` (height counted in edges from root). Returns the
+# BFS vertex order (root first) and the `parent` map (root absent). Modeled on
+# the BFS loop in `random_spanning_tree`, but deterministic and depth-bounded.
+function bfs_tree(network::TensorNetworkState, root, height::Int)
+    V = keytype(network)
+    parent = Dictionary{V, V}()
+    depth = Dictionary{V, Int}()
+    order = V[root]
+    insert!(depth, root, 0)
+    head = 1
+    while head <= length(order)
+        v = order[head]
+        head += 1
+        depth[v] >= height && continue
+        for n in neighbors(network, v)
+            haskey(depth, n) && continue
+            insert!(depth, n, depth[v] + 1)
+            insert!(parent, n, v)
+            push!(order, n)
+        end
+    end
+    return order, parent
+end
+
+# Propagate a change `δ` along edge `e = (s → r)` to the downstream edges that
+# consume `msgs[e]` — the outgoing edges `r → t` with `t ≠ s`.
+function propagate_change!(residuals, network, e::DirectedEdge, δ)
+    s, r = first(e), last(e)
+    for t in neighbors(network, r)
+        t == s && continue
+        residuals[DirectedEdge(r, t)] += δ
+    end
+    return residuals
 end
