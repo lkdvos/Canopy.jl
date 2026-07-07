@@ -4,8 +4,7 @@
 # ring length `L` and virtual bond dimension `Dmax`. Scaling with `Dmax`
 # is the kernel-improvement signal to watch.
 
-using Canopy: compute_message, compute_message!
-using Canopy: compute_outgoing_messages, compute_outgoing_messages!
+using Canopy: compute_message, compute_message!, outgoing_edges
 
 for (L, Dmax) in [(8, 4), (16, 8), (32, 16)]
     SUITE["message"]["ring", L, Dmax] = @benchmarkable(
@@ -35,12 +34,13 @@ SUITE["message"]["ring", 16, 8, :inplace] = @benchmarkable(
 # watch; compare against `d ×` the single-edge `message` benchmarks above.
 for Dmax in [8, 16, 32]
     SUITE["message"]["square_vertex", Dmax] = @benchmarkable(
-        compute_outgoing_messages!(out, msgs, state, v),
+        compute_message!(out, msgs, state, edges),
         setup = (
             state = square_state(5, 5, $Dmax);
             msgs = warm_messages(state);
             v = 13;                          # interior (degree-4) vertex of grid([5, 5])
-            out = compute_outgoing_messages(msgs, state, v)
+            edges = collect(outgoing_edges(state, v));
+            out = compute_message(msgs, state, edges)
         ),
     )
 end

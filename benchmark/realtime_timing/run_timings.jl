@@ -3,11 +3,11 @@
 # Per-step timing trace of the real-time free-fermion quench (BP + bond truncation).
 #
 # Times each phase of every Trotter step (single → hop → single → BP reconverge) and writes
-# one wide CSV per χ to `<outdir>/<prefix>_chi<χ>.csv`. Mirrors the circuit of
-# `examples/realtime/main.jl`, but runs BP for a *fixed* `--bp-iters` sweeps (`tol=0`) so the
+# one wide CSV per run (all χ stacked) to `<outdir>/<prefix>_<model>.csv`. Mirrors the circuit
+# of `examples/realtime/main.jl`, but runs BP for a *fixed* `--bp-iters` sweeps (`tol=0`) so the
 # work per step is constant and comparable across libraries.
 #
-#   ./run_timings.jl --prefix canopy --outdir data --nsteps 30 --chi 4 8 16 32
+#   ./run_timings.jl --prefix canopy --outdir data --model tfim-z2 --nsteps 15 --chi 4 8 16 32 64
 #   julia --project=benchmark/realtime_timing benchmark/realtime_timing/run_timings.jl --help
 #
 # Set JULIA_NUM_THREADS to a fixed value — `apply!` threads over gates and the thread count is
@@ -21,7 +21,7 @@ using Canopy: hexagonal_lattice, product_state, BPMessages, belief_propagation,
     LocalGate, CompositeGate, Circuit, apply!, edge_coloring, virtualspace, UndirectedEdge
 using TensorKit
 using TensorKitTensors.FermionOperators: f_num, f_hopping, fermion_space
-using TensorKitTensors.SpinOperators: σˣ, σᶻ
+using TensorKitTensors.SpinOperators: σˣ, σᶻ, S_z_S_z, spin_space
 using MatrixAlgebraKit: truncrank
 using Dictionaries
 using DataFrames
@@ -43,20 +43,20 @@ function parse_cli(args)
         "--nsteps"
         help = "number of Trotter steps to time"
         arg_type = Int
-        default = 30
+        default = 15
         "--chi"
-        help = "bond dimensions to sweep (one CSV per value)"
+        help = "bond dimensions to sweep (all stacked into one CSV)"
         arg_type = Int
         nargs = '+'
-        default = [4, 8, 16, 32]
+        default = [4, 8, 16, 32, 64]
         "--bp-iters"
         help = "fixed BP sweeps per step (run with tol=0)"
         arg_type = Int
         default = 30
         "--model"
-        help = "physics model: free-fermion (default), free-fermion-u1 (U(1) particle-number conserving), or tfim (staggered transverse-field Ising)"
+        help = "physics model: free-fermion (default, fℤ₂ parity), free-fermion-u1 (parity + U(1) particle number), tfim (staggered transverse-field Ising), or tfim-z2 (the same TFIM with spin-flip Z2 symmetry)"
         default = "free-fermion"
-        range_tester = m -> m in ("free-fermion", "free-fermion-u1", "tfim")
+        range_tester = m -> m in ("free-fermion", "free-fermion-u1", "tfim", "tfim-z2")
     end
     return parse_args(args, s)
 end
@@ -76,13 +76,24 @@ const DUMMY = (0, 0, 0)        # charge-bath site for the U(1) model (distinct f
 μ_of(v) = isodd(v[3]) ? MU : -MU
 occ_of(v) = (sum(v) % 4 == 0) ? 0 : 1
 h_of(v) = isodd(v[3]) ? H_FIELD : -H_FIELD   # staggered transverse field, by sublattice
-spinup_of(v) = isodd(v[3])                    # Néel pattern: sublattice A up / B down
+sublattice_A(v) = isodd(v[3])                 # σˣ-eigenstate pattern: A → |+⟩, B → |−⟩
 
 function initial_state(model)
-    if model == "tfim"
-        P = ComplexSpace(2)
-        ps = Dictionary(VERTS, fill(P, length(VERTS)))
-        ls = Dictionary(VERTS, [Trivial() => (spinup_of(v) ? ComplexF64[1, 0] : ComplexF64[0, 1]) for v in VERTS])
+    if model == "tfim" || model == "tfim-z2"
+        # σˣ eigenstates: |+⟩ (σˣ=+1) = Z2 charge 0, |−⟩ (σˣ=−1) = Z2 charge 1. The |+⟩/|−⟩ Néel
+        # pattern puts equal counts of each charge on the bipartite lattice, so the total Z2 charge
+        # is trivial — representable under Z2 with no charge-bath site. Both variants use the *same*
+        # physical state, isolating the symmetry-bookkeeping cost (cf. free-fermion trivial vs U(1)).
+        if model == "tfim-z2"
+            P = spin_space(Z2Irrep)
+            ps = Dictionary(VERTS, fill(P, length(VERTS)))
+            ls = Dictionary(VERTS, [Z2Irrep(sublattice_A(v) ? 0 : 1) => [1.0] for v in VERTS])
+        else
+            P = ComplexSpace(2)
+            plus, minus = ComplexF64[1, 1] / sqrt(2), ComplexF64[1, -1] / sqrt(2)
+            ps = Dictionary(VERTS, fill(P, length(VERTS)))
+            ls = Dictionary(VERTS, [Trivial() => (sublattice_A(v) ? plus : minus) for v in VERTS])
+        end
         return product_state(ComplexF64, ES, ps, ls)
     elseif model == "free-fermion-u1"
         # The lattice carries total charge fℤ₂(Q mod 2) ⊠ U1Irrep(Q) with Q = Σ occ_of(v); only the
@@ -113,11 +124,17 @@ end
 # Returns (single-site layer, two-site layer); the two-site layer is the `hop` phase in the CSV
 # (free-fermion hopping, or the σᶻσᶻ Ising coupling for the TFIM).
 function build_layers(model)
-    if model == "tfim"
-        sx, sz = σˣ(ComplexF64), σᶻ(ComplexF64)
+    if model == "tfim" || model == "tfim-z2"
+        if model == "tfim-z2"
+            sx = σˣ(ComplexF64, Z2Irrep)
+            zz = 4 * S_z_S_z(ComplexF64, Z2Irrep)   # σᶻ⊗σᶻ = (2 S_z)⊗(2 S_z)
+        else
+            sx = σˣ(ComplexF64)
+            zz = σᶻ(ComplexF64) ⊗ σᶻ(ComplexF64)
+        end
         g_plus = exp(-im * H_FIELD * DT * sx)
         g_minus = exp(-im * (-H_FIELD) * DT * sx)
-        g_zz = exp(-im * (-J_ISING * DT) * (sz ⊗ sz))
+        g_zz = exp(-im * (-J_ISING * DT) * zz)
         single = CompositeGate([LocalGate((v,), h_of(v) > 0 ? g_plus : g_minus) for v in VERTS])
         two = Circuit(
             [
@@ -147,7 +164,7 @@ maxdim(state) = maximum(dim(virtualspace(state, e)) for e in ES)
 # One timed trajectory. Returns a wide DataFrame; row `step=0` is the initial BP convergence
 # (gate columns 0.0), rows `step ≥ 1` are the Trotter steps. No warmup: step 1 carries Julia's
 # JIT-compilation cost, which is itself informative.
-function run_chi_timed(χ, nsteps, bp_iters, model)
+function run_chi_timed(χ, nsteps, bp_iters, model, library)
     state = initial_state(model)
     msgs = BPMessages(state)
     single, hop = build_layers(model)
@@ -162,7 +179,7 @@ function run_chi_timed(χ, nsteps, bp_iters, model)
     msgs = r.value
     push!(
         rows, (;
-            chi=χ, nthreads=nt, nsites=NSITES, dt=DT, step=0,
+            library=library, model=model, chi=χ, nthreads=nt, nsites=NSITES, dt=DT, step=0,
             single1=0.0, hop=0.0, single2=0.0, bp=r.time,
             single1_bytes=0, hop_bytes=0, single2_bytes=0, bp_bytes=r.bytes,
             maxdim=maxdim(state),
@@ -180,7 +197,7 @@ function run_chi_timed(χ, nsteps, bp_iters, model)
         msgs = rb.value
         push!(
             rows, (;
-                chi=χ, nthreads=nt, nsites=NSITES, dt=DT, step=step,
+                library=library, model=model, chi=χ, nthreads=nt, nsites=NSITES, dt=DT, step=step,
                 single1=r1.time, hop=rh.time, single2=r2.time, bp=rb.time,
                 single1_bytes=r1.bytes, hop_bytes=rh.bytes, single2_bytes=r2.bytes, bp_bytes=rb.bytes,
                 maxdim=maxdim(state),
@@ -194,7 +211,7 @@ function (@main)(args)
     opts = parse_cli(args)
     prefix, outdir = opts["prefix"], opts["outdir"]
     nsteps, chis, bp_iters, model = opts["nsteps"], opts["chi"], opts["bp-iters"], opts["model"]
-    suffix = get(Dict("tfim" => "_tfim", "free-fermion-u1" => "_u1"), model, "")
+    outfile = joinpath(outdir, "$(prefix)_$(replace(model, "-" => "_")).csv")
 
     @printf("Real-time timing on a %d-site hexagonal lattice (Canopy.jl)\n", NSITES)
     @printf(
@@ -203,18 +220,20 @@ function (@main)(args)
     )
 
     mkpath(outdir)
-    for χ in chis
-        df = run_chi_timed(χ, nsteps, bp_iters, model)
-        outfile = joinpath(outdir, "$(prefix)$(suffix)_chi$(χ).csv")
-        CSV.write(outfile, df)
+    # Write each χ as it completes (append after the first) so a crash at a large χ — the heaviest
+    # ones can OOM — keeps the smaller-χ data already on disk rather than losing the whole run.
+    for (i, χ) in enumerate(chis)
+        df = run_chi_timed(χ, nsteps, bp_iters, model, prefix)
+        CSV.write(outfile, df; append=i > 1, writeheader=i == 1)
         loop = df[df.step.>=1, :]
         med = sort(loop.single1 .+ loop.hop .+ loop.single2 .+ loop.bp)[cld(nrow(loop), 2)]
         medb = sort(loop.single1_bytes .+ loop.hop_bytes .+ loop.single2_bytes .+ loop.bp_bytes)[cld(nrow(loop), 2)]
         @printf(
-            "χ=%2d  median step %.4fs  (bp %.4fs)  heap %.1f MiB/step  maxdim=%d  → %s\n",
-            χ, med, sort(loop.bp)[cld(nrow(loop), 2)], medb / 2^20, maximum(loop.maxdim), basename(outfile)
+            "χ=%2d  median step %.4fs  (bp %.4fs)  heap %.1f MiB/step  maxdim=%d\n",
+            χ, med, sort(loop.bp)[cld(nrow(loop), 2)], medb / 2^20, maximum(loop.maxdim)
         )
         flush(stdout)
     end
+    @printf("\nwrote %d steps × %d χ → %s\n", nsteps, length(chis), basename(outfile))
     return 0
 end
