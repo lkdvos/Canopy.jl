@@ -17,7 +17,7 @@ There is no separate generic graph type. The state's per-vertex adjacency list l
 - **Containers are static.** No structural mutation of the vertex/adjacency dictionaries after construction; tensor values can be updated freely.
 - **Edge orientation in the state** is fixed by vertex ordering: for undirected edge `(u, v)` we store the key with `u ≤ v`. The smaller-keyed endpoint is the source.
 - **Codomain/domain split.** Every vertex tensor has exactly **one** physical leg in the codomain and a fixed number `N` of virtual legs in the domain, where `N` is the maximum coordination of the graph. Virtual legs beyond the vertex's actual degree are padded with `oneunit(S)` and contribute trivially to contractions.
-- **Duality.** Virtual spaces are stored once per undirected edge as non-dual `S` values. For an edge `e = (u, v)` (canonical, `u < v`) with stored space `V_e`, the `u`-side carries `V_e` and the `v`-side carries `dual(V_e)`. The constructor enforces non-dual input; `check_consistency` verifies the duality invariant across the whole network.
+- **Duality.** Virtual spaces are stored once per undirected edge as non-dual `S` values. For an edge `e = (u, v)` (canonical, `u < v`) with stored space `V_e`, the `u`-side carries `V_e` and the `v`-side carries `dual(V_e)`. The constructor enforces non-dual input; `check_consistency` verifies the duality invariant across the whole network. This duality convention is also what makes the fermionic signs consistent — see [Fermionic correctness](@ref).
 - **No multigraphs, no self-loops.**
 
 ## Graph primitives
