@@ -13,11 +13,17 @@ Bumper = "8ce10254-0962-460f-a3d8-1f77fea1446e"
 Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
 Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 MatrixAlgebraKit = "6c742aac-3347-4629-af66-fc926824e5e4"
+OpenQASM = "a8821629-a4c0-4df7-9e00-12969ff383a7"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 TensorKit = "07d1fe3e-3e46-537d-9eac-e9e13d0d4cec"
 TensorKitTensors = "41b62e7d-e9d1-4e23-942c-79a97adf954b"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 VectorInterface = "409d34a3-91d5-4945-b6ec-7529ddf182d8"
+
+[sources]
+# TensorKitTensors 0.3 (the `QuantumGates` module) is not released yet: it lives in
+# QuantumKitHub/TensorKitTensors.jl#50. Remove this once it is registered.
+TensorKitTensors = {url = "https://github.com/QuantumKitHub/TensorKitTensors.jl", rev = "quantumgates"}
 
 [compat]
 Adapt = "4"
@@ -26,9 +32,10 @@ Bumper = "0.7.2"
 Dictionaries = "0.4.6"
 Graphs = "1.14.0"
 MatrixAlgebraKit = "0.6.7"
+OpenQASM = "2.1"
 Random = "1.11.0"
 TensorKit = "0.16.5, 0.17"
-TensorKitTensors = "0.2.5"
+TensorKitTensors = "0.3"
 TimerOutputs = "0.5"
 VectorInterface = "0.5.0, 0.6"
 julia = "1.10"
