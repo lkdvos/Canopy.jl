@@ -28,6 +28,7 @@ makedocs(;
     pages = [
         "Home" => "index.md",
         "Design" => "design.md",
+        "Constructing states" => "states.md",
         "Fermions" => "fermions.md",
         "Examples" => ["examples/index.md"; example_pages],
     ],

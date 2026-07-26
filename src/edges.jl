@@ -1,5 +1,18 @@
 abstract type AbstractEdge{V} end
 
+"""
+    UndirectedEdge(u, v)
+
+An undirected edge between vertex tokens `u` and `v`, stored in canonical orientation: the
+constructor swaps its arguments so that `first(e) < last(e)` always holds, making
+`UndirectedEdge(u, v) == UndirectedEdge(v, u)` and giving each edge a single identity as a
+dictionary key.
+
+That ordering also carries the conventions: virtual spaces are stored non-dual on the
+smaller-vertex side, and the vertex order is the fermion order (see
+[Fermionic correctness](@ref)). `reverse` is therefore the identity on an `UndirectedEdge`
+— convert to a [`DirectedEdge`](@ref) to talk about one side of a bond.
+"""
 struct UndirectedEdge{V} <: AbstractEdge{V}
     src::V
     dst::V
@@ -8,6 +21,15 @@ end
 UndirectedEdge(u::V, v::V) where {V} = UndirectedEdge{V}(u, v)
 UndirectedEdge(u, v) = UndirectedEdge(promote(u, v)...)
 
+"""
+    DirectedEdge(u, v)
+
+An oriented edge from `u` to `v`, preserving its argument order. Used wherever a side of a
+bond matters: BP messages are keyed by `DirectedEdge`, read as *sender → receiver*, and
+`leg_index`/`virtualspace` locate a leg within `first(e)`'s tensor.
+
+Converts to and from [`UndirectedEdge`](@ref).
+"""
 struct DirectedEdge{V} <: AbstractEdge{V}
     src::V
     dst::V
@@ -32,6 +54,16 @@ Base.reverse(e::DirectedEdge) = DirectedEdge(e.dst, e.src)
 Base.reverse(e::UndirectedEdge) = e
 
 Base.:(==)(e1::E, e2::E) where {E <: AbstractEdge} = Tuple(e1) == Tuple(e2)
+
+"""
+    vertices(edges::AbstractVector{<:UndirectedEdge})
+
+Return the vertex tokens spanned by `edges`, in first-encountered order — the same
+order in which a state built on `edges` iterates its vertices. Useful to key the
+dictionaries expected by the [`TensorNetworkState`](@ref) constructors, e.g.
+`Dictionary(vertices(es), ...)`.
+"""
+vertices(edges::AbstractVector{<:UndirectedEdge}) = collect(keys(adjacency(Indices(edges))))
 
 function adjacency(edges::Indices{UndirectedEdge{V}}) where {V}
     adj = Dictionary{V, Vector{V}}()

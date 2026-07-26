@@ -39,10 +39,13 @@ under [Conventions](@ref) in the design notes; here is the fermionic consequence
   invariant is re-verified by `check_consistency`:
 
   ```julia
-  virtualspace(state, edge) == dual(virtualspace(state, reverse(edge)))
+  virtualspace(state, e) == dual(virtualspace(state, reverse(e)))
   ```
 
-  with the non-dual side always the smaller vertex.
+  with the *stored* space non-dual on its smaller-vertex side. The edge must be
+  oriented — `reverse` is the identity on an `UndirectedEdge` — so `e` here is a
+  `DirectedEdge`. Note also that `space` dualizes domain legs, so the value
+  `virtualspace` returns is non-dual when `first(e) > last(e)`.
 
 - **Charge convention.** For product states the same rule is stated at the level
   of symmetry charges: `c_v = ⊗_w σ(v, w) q_e` with `σ = identity if v < w else

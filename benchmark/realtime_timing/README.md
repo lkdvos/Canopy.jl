@@ -47,9 +47,10 @@ Four `--model` values, each a separate run written to `<prefix>_<model>.csv` (wi
 
 - `free-fermion` (default) — spinless free fermions (fermion-parity `fℤ₂`).
 - `free-fermion-u1` — the *same* quench with conserved U(1) particle number (`fℤ₂ ⊠ U1Irrep`), to
-  measure symmetry-block bookkeeping. Only the trivial total charge is representable, so a single
-  charge-bath "dummy" site carrying the compensating charge is anchored by one 1-dimensional bond;
-  it stays idle (no gate) so the timing reflects the U(1) overhead on the real lattice bonds.
+  measure symmetry-block bookkeeping. The lattice carries a nontrivial total charge, so
+  `product_state(...; total_charge = ...)` anchors a charge-bath site carrying the compensating
+  charge by one 1-dimensional bond; it stays idle (no gate) so the timing reflects the U(1)
+  overhead on the real lattice bonds.
 - `tfim` — a transverse-field Ising model with a *staggered* transverse field
   (`exp(-i·(±h)·dt·σˣ)`, sign alternating by sublattice) and a `σᶻσᶻ` coupling.
 - `tfim-z2` — the *same* TFIM with the spin-flip ℤ₂ symmetry (`Z2Irrep`), the spin analogue of the

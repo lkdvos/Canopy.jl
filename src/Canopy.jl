@@ -30,11 +30,13 @@ include("bumper.jl")
 
 include("edges.jl")
 
+include("states/charges.jl")
 include("states/tensornetworkstate.jl")
 include("states/lattices.jl")
 include("states/productstate.jl")
 export square_lattice, triangular_lattice, hexagonal_lattice
-export product_state
+export product_state, randn_state, rand_state
+export vertices
 
 include("utility.jl")
 include("messages.jl")

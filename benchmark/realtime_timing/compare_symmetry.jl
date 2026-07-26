@@ -29,8 +29,8 @@
 using Pkg
 Pkg.activate(@__DIR__; io=devnull)
 
-using Canopy: hexagonal_lattice, product_state, BPMessages, belief_propagation,
-    UndirectedEdge, LocalGate, CompositeGate, Circuit, apply!, edge_coloring, expect, virtualspace
+using Canopy: hexagonal_lattice, product_state, vertices, BPMessages, belief_propagation,
+    LocalGate, CompositeGate, Circuit, apply!, edge_coloring, expect, virtualspace
 using TensorKit
 using TensorKitTensors.FermionOperators: f_num, f_hopping, fermion_space
 using MatrixAlgebraKit: truncrank
@@ -57,8 +57,7 @@ const DATADIR = joinpath(@__DIR__, "data")
 const FIGDIR = joinpath(@__DIR__, "figs")
 
 const ES = hexagonal_lattice(M, N)
-const VERTS = sort(unique(Iterators.flatten((e.src, e.dst) for e in ES)))
-const DUMMY = (0, 0, 0)       # charge-bath site for the U(1) model (distinct from (i,j,s), i,j≥1)
+const VERTS = sort(vertices(ES))
 
 μ_of(v) = isodd(v[3]) ? MU : -MU
 occ_of(v) = (sum(v) % 4 == 0) ? 0 : 1
@@ -77,19 +76,14 @@ initial_state(::Type{Trivial}) = let P = fermion_space(Trivial)
     product_state(ComplexF64, ES, ps, ls)
 end
 
+# `total_charge` anchors a charge-bath site carrying the compensating charge; it stays idle
+# (no gate, 1-dim bond) since the gate layers only range over VERTS.
 function initial_state(::Type{U1Irrep})
     Q = sum(occ_of(v) for v in VERTS)
-    dsec = fℤ₂(mod(Q, 2)) ⊠ U1Irrep(-Q)
     P = fermion_space(U1Irrep)
-    I = sectortype(P)
-    verts = vcat(VERTS, [DUMMY])
-    es = vcat(ES, [UndirectedEdge(DUMMY, first(VERTS))])
-    ps = Dictionary(verts, vcat(fill(P, length(VERTS)), [Vect[I](dsec => 1)]))
-    ls = Dictionary(
-        verts,
-        vcat([(fℤ₂(occ_of(v)) ⊠ U1Irrep(occ_of(v))) => [1.0] for v in VERTS], [dsec => [1.0]]),
-    )
-    return product_state(ComplexF64, es, ps, ls)
+    ps = Dictionary(VERTS, fill(P, length(VERTS)))
+    ls = Dictionary(VERTS, [(fℤ₂(occ_of(v)) ⊠ U1Irrep(occ_of(v))) => [1.0] for v in VERTS])
+    return product_state(ComplexF64, ES, ps, ls; total_charge = fℤ₂(mod(Q, 2)) ⊠ U1Irrep(Q))
 end
 
 function build_layers(sym)

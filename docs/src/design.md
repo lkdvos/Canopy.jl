@@ -144,14 +144,25 @@ The constructor:
 2. Checks that `keys(pspaces) == keys(adjacency)` and that all `vspaces` values are non-dual.
 3. For each vertex `v`, allocates a `StateTensor` with codomain `pspaces[v]` and domain `V_1 ⊗ ... ⊗ V_N`, where the first `length(adjacency[v])` factors are the (possibly dualized) `vspaces` entries and the rest are `oneunit(S)`.
 
-Tensors are then filled by the user, typically with `Random.randn!(state)` or `Random.rand!(state)`, both of which delegate to the underlying TensorKit tensors. A convenience constructor that builds the dictionaries from a `Graphs.AbstractGraph` plus uniform spaces is a natural future addition; it is intentionally left out for now to keep the data structure small.
+Tensors are then filled by the user, typically with `Random.randn!(state)` or `Random.rand!(state)`, both of which delegate to the underlying TensorKit tensors.
 
 The constructor stress-tests the data structure: anything awkward to build here points at a design problem.
+
+### Entry points
+
+Everything else funnels into that constructor. `randn_state` and `rand_state` allocate and fill in one call; `product_state` builds a state that is a product over its vertices. Each accepts a *topology* — a vector of `UndirectedEdge`s, as produced by `square_lattice`, `triangular_lattice` and `hexagonal_lattice`, or a `Graphs.AbstractGraph` — in place of the dictionary pair. See [Constructing states](@ref) for the full interface.
+
+Two design decisions are worth recording here.
+
+**Product-state bond charges are deduced, not supplied.** A nontrivial-charge site state cannot be written as a bare ket `P ← oneunit`, since that map only reaches the trivial sector; the 1-dimensional bonds must therefore carry whatever charge makes each on-site tensor consistent. For an abelian symmetry this is a linear system over the symmetry group, solved on a breadth-first spanning tree per connected component, and solvable exactly when each component is charge-neutral. This is what confines `product_state` to abelian sectortypes: the solve relies on `⊗` having a unique outcome.
+
+**The charge bath is an ordinary vertex, not a tracked one.** A closed network of charge-conserving tensors has trivial total charge, so a state in a nontrivial global sector needs one auxiliary vertex carrying the compensating charge on a 1-dimensional bond. That vertex is deliberately *not* recorded in the struct: it appears in `vertices(state)` and `TensorMap(state)` like any other, and callers exclude it from gate lists and observables themselves. Tracking it would add a field and touch every place that iterates vertices, for a construction-time concern — see the open questions below. It attaches to a minimum-degree vertex so that it does not raise `N` and thereby give every tensor in the network an extra `oneunit`-padded leg.
 
 ## Open questions / future work
 
 - **Message bond dimensions** independent of state bond dimensions (for loop-corrected BP, boundary-MPS environments). The current shape supports this — `BPMessages` is parameterized independently — but the constructor and `check_consistency` check will need refinement.
-- **`AbstractGraph` constructor** that takes a graph and uniform spaces and emits the underlying dictionaries. Pure ergonomics; the data structure already covers it.
+- **Auxiliary-vertex tracking** so that observables, gate lists and Trotter schemes can skip charge-bath sites automatically instead of by caller convention. Would add a field to the struct and touch every place that iterates vertices.
+- **Non-abelian product states**, which need degeneracy and multiplicity indices to be distinguished in the local-state specification, and a fusion-tree solve rather than the current unique-fusion one.
 - **Mutable graphs** for coarse-graining / RG workflows. Out of scope for v1; would force `adjacency` and `vertices` to support structural updates.
 - **Adjacency matrix cache** as a derived field for spectral graph operations. Add only if profiling justifies.
 - **Multiple outer legs per site** (e.g. ancillas) with symbolic naming. Currently the codomain is a single physical leg; a thin wrapper can extend this without touching the core.
