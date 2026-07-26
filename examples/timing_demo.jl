@@ -8,24 +8,19 @@
 #
 # Run:  julia --project=examples examples/timing_demo.jl
 
-using Canopy: TensorNetworkState, BPMessages, belief_propagation,
+using Canopy: randn_state, BPMessages, belief_propagation,
     UndirectedEdge, apply!, Strang, trotterize, edge_coloring
 using TensorKit
 using TensorKitTensors.SpinOperators: σˣ, σᶻ
 using MatrixAlgebraKit: truncrank, trunctol
-using Dictionaries
 using Graphs: cycle_graph, edges, src, dst, nv
 using Random
 using TimerOutputs
 
-function ring_state(L::Int, Dmax::Int; T::Type=ComplexF64, S::Type=ComplexSpace)
+function ring_state(L::Int, Dmax::Int; T::Type=ComplexF64)
     g = cycle_graph(L)
-    pspaces = Dictionary{Int,S}(1:L, [ComplexSpace(2) for _ in 1:L])
     ekeys = [UndirectedEdge(src(e), dst(e)) for e in edges(g)]
-    vspaces = Dictionary{UndirectedEdge{Int},S}(ekeys, [ComplexSpace(Dmax) for _ in ekeys])
-    st = TensorNetworkState{T}(undef, pspaces, vspaces)
-    Random.randn!(st)
-    return st, ekeys
+    return randn_state(T, ekeys, ComplexSpace(2), ComplexSpace(Dmax)), ekeys
 end
 
 function tfim_bond_hamiltonian(J::Real, h::Real, deg_u::Int, deg_v::Int; T::Type=ComplexF64)

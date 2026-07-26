@@ -1,15 +1,14 @@
 # Shared state-construction helpers for the BP benchmark suite.
 #
-# Assumes `Canopy`, `TensorKit`, `Graphs`, `Dictionaries`, `Random`, and
+# Assumes `Canopy`, `TensorKit`, `Graphs`, `Random`, and
 # `AlgorithmsInterface as AI` are already brought into scope by the caller
 # (see `benchmarks.jl`).
 
-using Canopy: TensorNetworkState, BPMessages, belief_propagation, UndirectedEdge
+using Canopy: randn_state, BPMessages, belief_propagation
 using Canopy: SynchronousSchedule, SpanningTreeSchedule, ResidualSchedule, GreedySampler
 using TensorKit: ComplexSpace
 using TensorKit: TO
-using Graphs: cycle_graph, grid, edges, src, dst
-using Dictionaries: Dictionary
+using Graphs: cycle_graph, grid
 using Random
 import Bumper
 
@@ -23,22 +22,11 @@ const BENCH_ALLOCATORS = (
     :bumper => Bumper.default_buffer(Bumper.ResizeBuffer),
 )
 
-function ring_state(L::Int, Dmax::Int; T::Type = ComplexF64, S::Type = ComplexSpace)
-    g = cycle_graph(L)
-    pspaces = Dictionary{Int, S}(1:L, [ComplexSpace(2) for _ in 1:L])
-    ekeys = [UndirectedEdge(src(e), dst(e)) for e in edges(g)]
-    vspaces = Dictionary{UndirectedEdge{Int}, S}(ekeys, [ComplexSpace(Dmax) for _ in ekeys])
-    st = TensorNetworkState{T}(undef, pspaces, vspaces)
-    Random.randn!(st)
-    return st
-end
+ring_state(L::Int, Dmax::Int; T::Type = ComplexF64) =
+    randn_state(T, cycle_graph(L), ComplexSpace(2), ComplexSpace(Dmax))
 
-function square_state(n::Int, m::Int, Dmax::Int; T::Type = ComplexF64)
-    g = grid([n, m])
-    st = TensorNetworkState{T}(undef, g, ComplexSpace(2), ComplexSpace(Dmax))
-    Random.randn!(st)
-    return st
-end
+square_state(n::Int, m::Int, Dmax::Int; T::Type = ComplexF64) =
+    randn_state(T, grid([n, m]), ComplexSpace(2), ComplexSpace(Dmax))
 
 # Run a few BP iterations so kernel benchmarks measure cost on
 # typical-shape messages rather than identity-initialised ones.

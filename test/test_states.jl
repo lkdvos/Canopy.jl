@@ -1,5 +1,6 @@
 using Canopy
-using Canopy: UndirectedEdge, DirectedEdge, belief_propagation, reduced_density_matrix, expect
+using Canopy: UndirectedEdge, DirectedEdge, belief_propagation, reduced_density_matrix, expect,
+              auxiliary_vertex, check_consistency
 using TensorKit
 using LinearAlgebra: isposdef
 using TensorKitTensors.SpinOperators: σᶻ, S_z_S_z, S_exchange
@@ -7,7 +8,7 @@ using TensorKitTensors.FermionOperators: f_num, f_hopping, fermion_space
 using Graphs
 using Test
 using Dictionaries
-using Random: Random, randn!
+using Random: Random, randn!, rand!, MersenneTwister
 
 
 # Exact reduced density matrix of the dense wavefunction `psi` on `sites`,
@@ -325,6 +326,7 @@ end
     for es in (square_lattice(2, 3), triangular_lattice(2, 2))
         state = product_state(es, P, Trivial() => coeffs)
         @test Canopy.scalartype(state) == Float64
+        @test check_consistency(state)
         # all deduced bonds are one-dimensional
         @test all(e -> dim(virtualspace(state, e)) == 1, edges(state))
         # dense wavefunction is the (order-independent, uniform) product of local kets
@@ -348,6 +350,7 @@ end
     state = product_state(es, ps, ls)
 
     @test all(e -> dim(virtualspace(state, e)) == 1, edges(state))
+    @test check_consistency(state)
 
     msgs = Canopy.BPMessages(state)
     msgs = belief_propagation(msgs, state; maxiter = 50)
@@ -355,6 +358,35 @@ end
     for v in verts
         @test isapprox(real(expect(state, msgs, nop, (v,))), occ[v]; atol = 1e-8)
     end
+end
+
+@testset "Product state — local-state shorthands" begin
+    es = square_lattice(2, 2)
+    verts = vertices(es)
+
+    # a bare coefficient vector means the trivial sector
+    P = ComplexSpace(2)
+    explicit = product_state(es, P, Trivial() => [0.3, 0.4])
+    bare = product_state(es, P, [0.3, 0.4])
+    @test all(v -> explicit[v] ≈ bare[v], verts)
+    @test scalartype(bare) === Float64
+
+    # a bare sector means unit coefficients, hence `Bool` → `Float64`
+    Pf = fermion_space(Trivial)
+    occ = Dictionary(verts, [isodd(v[1] + v[2]) ? 1 : 0 for v in verts])   # neutral parity
+    explicit_f = product_state(es, Pf, map(n -> fℤ₂(n) => [1.0], occ))
+    bare_f = product_state(es, Pf, map(fℤ₂, occ))
+    @test all(v -> explicit_f[v] ≈ bare_f[v], verts)
+    @test scalartype(bare_f) === Float64
+    @test scalartype(product_state(ComplexF64, es, Pf, map(fℤ₂, occ))) === ComplexF64
+
+    # anything convertible to the sectortype works — `1` for `U1Irrep`. Also the
+    # mixed form: a uniform physical space with per-vertex local states.
+    Pu = Vect[U1Irrep](-1 => 1, 1 => 1)
+    charges = Dictionary(verts, [isodd(v[1] + v[2]) ? 1 : -1 for v in verts])  # sums to 0
+    explicit_u = product_state(es, Pu, map(c -> U1Irrep(c) => [1.0], charges))
+    bare_u = product_state(es, Pu, charges)
+    @test all(v -> explicit_u[v] ≈ bare_u[v], verts)
 end
 
 @testset "Product state — errors" begin
@@ -371,7 +403,160 @@ end
     wrongdim = Dictionary(verts, [fℤ₂(0) => [1.0, 0.0] for _ in verts])
     @test_throws ArgumentError product_state(es, ps, wrongdim)
 
+    # a bare coefficient vector has no definite charge under a graded space
+    @test_throws ArgumentError product_state(es, Pf, [1.0, 0.0])
+
+    # a bare sector only selects a state if that sector is one-dimensional
+    @test_throws ArgumentError product_state(es, ComplexSpace(2), Trivial())
+
+    # the sector's *type* must be that of the physical space
+    @test_throws ArgumentError product_state(es, ComplexSpace(2), fℤ₂(1) => [1.0])
+
+    # the sector must appear in the physical space at all
+    @test_throws ArgumentError product_state(es, Vect[U1Irrep](0 => 1, 1 => 1), U1Irrep(5) => [1.0])
+
+    # `Dictionary` keys must span exactly the vertices of the topology
+    @test_throws ArgumentError product_state(square_lattice(2, 3), ps, wrongdim)
+    @test_throws ArgumentError product_state(es, ps, Dictionary(verts[1:3], fill(fℤ₂(0), 3)))
+
     # non-abelian symmetry is rejected
     Vsu2 = Vect[SU2Irrep](1 // 2 => 1)
     @test_throws ArgumentError product_state(es, Vsu2, SU2Irrep(1 // 2) => [1.0])
+end
+
+# Maximum coordination number of a state: every on-site tensor carries exactly `N`
+# domain legs, unit-padded beyond the vertex's neighbors.
+maxcoordination(state) = numin(state[first(vertices(state))])
+
+@testset "Product state — charge bath" begin
+    es = square_lattice(2, 3)          # checkerboard → 3 particles, so not neutral
+    verts = vertices(es)
+    Pu = fermion_space(U1Irrep)
+    I = sectortype(Pu)
+    occ(v) = isodd(v[1] + v[2]) ? 1 : 0
+    ls = Dictionary(verts, [fℤ₂(occ(v)) ⊠ U1Irrep(occ(v)) for v in verts])
+    Q = sum(occ, verts)
+    qtot = fℤ₂(mod(Q, 2)) ⊠ U1Irrep(Q)
+    @test Q == 3
+
+    @test_throws ArgumentError product_state(es, Pu, ls)                     # bath is opt-in
+    @test_throws ArgumentError product_state(es, Pu, ls; total_charge = fℤ₂(1) ⊠ U1Irrep(5))
+    @test_throws ArgumentError product_state(es, Pu, ls; total_charge = one(I))
+    # neutral local charges cannot absorb a nontrivial total charge either
+    @test_throws ArgumentError product_state(
+        square_lattice(2, 2), fermion_space(Trivial), fℤ₂(0); total_charge = fℤ₂(1)
+    )
+
+    aux = auxiliary_vertex(verts)
+    @test aux == (0, 0)
+    state = product_state(ComplexF64, es, Pu, ls; total_charge = qtot)
+    @test length(state) == length(verts) + 1
+    @test aux in vertices(state)
+    @test physicalspace(state, aux) == Vect[I](dual(qtot) => 1)
+    @test length(Canopy.neighbors(state, aux)) == 1
+    @test check_consistency(state)
+
+    # the bath attaches to a vertex of minimal degree, tie-broken by vertex order
+    @test only(Canopy.neighbors(state, aux)) == (1, 1)
+
+    # ... which is equivalent to spelling the bath out by hand, as
+    # `benchmark/realtime_timing/run_timings.jl` used to do
+    augmented = vcat(verts, [aux])
+    manual = product_state(
+        ComplexF64, vcat(es, [UndirectedEdge(aux, (1, 1))]),
+        Dictionary(augmented, vcat(fill(Pu, length(verts)), [Vect[I](dual(qtot) => 1)])),
+        Dictionary(augmented, vcat([ls[v] => [1.0] for v in verts], [dual(qtot) => [1.0]])),
+    )
+    @test all(v -> state[v] ≈ manual[v], vertices(state))
+
+    @test (-5, -5) in vertices(
+        product_state(ComplexF64, es, Pu, ls; total_charge = qtot, auxiliary = (-5, -5))
+    )
+    @test_throws ArgumentError product_state(
+        ComplexF64, es, Pu, ls; total_charge = qtot, auxiliary = (1, 1)
+    )
+
+    # BP is exact on a product state — 1-dim bonds make every message rank-1 — so
+    # the occupations are exact even on a loopy lattice
+    msgs = belief_propagation(BPMessages(state), state; maxiter = 50)
+    nop = f_num(ComplexF64, U1Irrep)
+    @test all(v -> isapprox(real(expect(state, msgs, nop, (v,))), occ(v); atol = 1.0e-8), verts)
+    @test isapprox(real(sum(expect(state, msgs, nop, (v,)) for v in verts)), Q; atol = 1.0e-8)
+
+    # attaching at minimal degree keeps `N` at the bath-free value
+    hex = hexagonal_lattice(2, 2)
+    L = length(vertices(hex))
+    hst = product_state(
+        ComplexF64, hex, Pu, fℤ₂(1) ⊠ U1Irrep(1);
+        total_charge = fℤ₂(mod(L, 2)) ⊠ U1Irrep(L),
+    )
+    plain = randn_state(ComplexF64, hex, Pu, Vect[I](one(I) => 1))
+    @test maxcoordination(hst) == maxcoordination(plain) == 3
+end
+
+@testset "Product state — graph topology" begin
+    state = product_state(cycle_graph(6), ComplexSpace(2), [1.0, 0.0])
+    @test length(state) == 6
+    @test issetequal(vertices(state), 1:6)
+    @test check_consistency(state)
+end
+
+@testset "vertices(edges)" begin
+    es = square_lattice(2, 3)
+    verts = vertices(es)
+    @test length(verts) == 6
+    @test issetequal(verts, [(i, j) for i in 1:2, j in 1:3])
+    # the order a state built on `es` iterates its vertices in
+    @test verts == collect(vertices(product_state(es, ComplexSpace(2), [1.0, 0.0])))
+end
+
+@testset "randn_state / rand_state" begin
+    es = square_lattice(2, 3)
+    P = fermion_space(Trivial)
+    V = Vect[fℤ₂](0 => 2, 1 => 2)
+
+    state = randn_state(MersenneTwister(0), ComplexF64, es, P, V)
+    reference = randn!(MersenneTwister(0), TensorNetworkState{ComplexF64}(undef, es, P, V))
+    @test all(v -> state[v] == reference[v], vertices(state))
+    @test check_consistency(state)
+
+    # the per-vertex/per-edge form draws the same numbers
+    @test all(v -> state[v] == randn_state(MersenneTwister(0), ComplexF64, Canopy._spaces(es, P, V)...)[v],
+              vertices(state))
+
+    rstate = rand_state(MersenneTwister(0), ComplexF64, es, P, V)
+    @test all(v -> rstate[v] == rand!(MersenneTwister(0), TensorNetworkState{ComplexF64}(undef, es, P, V))[v],
+              vertices(rstate))
+
+    # `rng` and `T` are independently optional, `T` defaults to `Float64`
+    @test scalartype(randn_state(MersenneTwister(0), es, P, V)) === Float64
+    @test scalartype(randn_state(ComplexF64, es, P, V)) === ComplexF64
+    @test scalartype(randn_state(es, P, V)) === Float64
+    @test check_consistency(rand_state(cycle_graph(6), ComplexSpace(2), ComplexSpace(3)))
+
+    # --- charge bath on a chain, where BP is exact ---
+    Pu = fermion_space(U1Irrep)
+    I = sectortype(Pu)
+    # the virtual charges must span both signs, or the target sector cannot flow
+    # through the network and the state comes out all-zero
+    Vu = Vect[I](
+        (fℤ₂(0) ⊠ U1Irrep(-2)) => 1, (fℤ₂(1) ⊠ U1Irrep(-1)) => 1, (fℤ₂(0) ⊠ U1Irrep(0)) => 2,
+        (fℤ₂(1) ⊠ U1Irrep(1)) => 1, (fℤ₂(0) ⊠ U1Irrep(2)) => 1,
+    )
+    chain = [UndirectedEdge(i, i + 1) for i in 1:5]
+    qtot = fℤ₂(1) ⊠ U1Irrep(3)
+    st = randn_state(MersenneTwister(0), ComplexF64, chain, Pu, Vu; total_charge = qtot)
+    @test auxiliary_vertex(vertices(chain)) == 0
+    @test length(st) == 7
+    @test physicalspace(st, 0) == Vect[I](dual(qtot) => 1)
+    @test length(Canopy.neighbors(st, 0)) == 1
+    @test check_consistency(st)
+    @test maxcoordination(st) == 2
+
+    # a trivial total charge needs no bath
+    @test length(randn_state(ComplexF64, chain, Pu, Vu; total_charge = one(I))) == 6
+
+    msgs = belief_propagation(BPMessages(st), st; maxiter = 200)
+    ntot = sum(expect(st, msgs, f_num(ComplexF64, U1Irrep), (v,)) for v in 1:6)
+    @test isapprox(real(ntot), 3; atol = 1.0e-8)
 end

@@ -214,8 +214,8 @@ end
 
 # Build (state, msgs) on a Graphs.jl graph with uniform spaces.
 function _state_on(g, P, V; seed)
-    state = TensorNetworkState{ComplexF64}(undef, g, P, V)
-    Random.seed!(seed); Random.randn!(state)
+    Random.seed!(seed)
+    state = randn_state(ComplexF64, g, P, V)
     return state, BPMessages(state)
 end
 

@@ -23,13 +23,12 @@ julia --project=examples examples/free_fermion_ring/main.jl
 ```
 
 ````julia
-using Canopy: TensorNetworkState, BPMessages, belief_propagation,
+using Canopy: randn_state, BPMessages, belief_propagation,
               UndirectedEdge, LocalGate, apply!, reduced_density_matrix, expect,
               Strang, trotterize, edge_coloring
 using TensorKit
 using TensorKitTensors.FermionOperators: f_num, f_hopping, fermion_space
 using MatrixAlgebraKit: truncrank, trunctol
-using Dictionaries
 using Graphs: cycle_graph, edges, src, dst, nv
 using Random
 using Statistics: mean
@@ -64,12 +63,8 @@ function ring_state(L::Int, Dmax::Int; T::Type=ComplexF64)
     @assert nv(g) == L
     P = fermion_space(Trivial)
     V = Vect[fℤ₂](0 => cld(Dmax, 2), 1 => fld(Dmax, 2))
-    pspaces = Dictionary{Int, typeof(P)}(1:L, fill(P, L))
     ekeys = [UndirectedEdge(src(e), dst(e)) for e in edges(g)]
-    vspaces = Dictionary{UndirectedEdge{Int}, typeof(V)}(ekeys, fill(V, length(ekeys)))
-    st = TensorNetworkState{T}(undef, pspaces, vspaces)
-    Random.randn!(st)
-    return st, ekeys
+    return randn_state(T, ekeys, P, V), ekeys
 end
 ````
 

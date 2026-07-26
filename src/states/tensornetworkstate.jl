@@ -110,6 +110,22 @@ function TensorNetworkState(
     return TensorNetworkState{Float64}(undef, pspaces, vspaces)
 end
 
+# --- topology and uniform spaces ----------------------------------------------
+# A topology is either a vector of `UndirectedEdge`s or a `Graphs.AbstractGraph`.
+_edgelist(edges::AbstractVector{<:UndirectedEdge}) = edges
+_edgelist(g::Graphs.AbstractGraph) = [UndirectedEdge(src(e), dst(e)) for e in edges(g)]
+
+# expand uniform physical and virtual spaces over a topology
+function _spaces(g::Graphs.AbstractGraph, P::S, V::S) where {S <: IndexSpace}
+    pspaces = Dictionary(vertices(g), fill(P, nv(g)))
+    vspaces = Dictionary(_edgelist(g), fill(V, ne(g)))
+    return pspaces, vspaces
+end
+function _spaces(es::AbstractVector{<:UndirectedEdge}, P::S, V::S) where {S <: IndexSpace}
+    verts = vertices(es)
+    return Dictionary(verts, fill(P, length(verts))), Dictionary(es, fill(V, length(es)))
+end
+
 """
     TensorNetworkState{T}(undef, g::Graphs.AbstractGraph, P::S, V::S)
     TensorNetworkState(undef, g::Graphs.AbstractGraph, P::S, V::S)
@@ -126,12 +142,7 @@ call `Random.randn!`/`Random.rand!` on the result to fill them.
 function TensorNetworkState{T}(
         ::UndefInitializer, g::Graphs.AbstractGraph, P::S, V::S,
     ) where {T, S <: IndexSpace}
-    pspaces = Dictionary(vertices(g), fill(P, nv(g)))
-    vspaces = Dictionary(
-        [UndirectedEdge(src(e), dst(e)) for e in edges(g)],
-        fill(V, ne(g)),
-    )
-    return TensorNetworkState{T}(undef, pspaces, vspaces)
+    return TensorNetworkState{T}(undef, _spaces(g, P, V)...)
 end
 
 function TensorNetworkState(
@@ -153,10 +164,7 @@ vertices are not represented). Useful together with the lattice constructors
 function TensorNetworkState{T}(
         ::UndefInitializer, edges::AbstractVector{<:UndirectedEdge}, P::S, V::S,
     ) where {T, S <: IndexSpace}
-    vspaces = Dictionary(edges, fill(V, length(edges)))
-    verts = keys(adjacency(keys(vspaces)))
-    pspaces = Dictionary(verts, fill(P, length(verts)))
-    return TensorNetworkState{T}(undef, pspaces, vspaces)
+    return TensorNetworkState{T}(undef, _spaces(edges, P, V)...)
 end
 
 function TensorNetworkState(
@@ -173,6 +181,87 @@ for f! in (:rand!, :randn!)
             (foreach(Base.Fix1(Random.$f!, rng), values(state.vertices)); state)
     end
 end
+
+# --- random states ------------------------------------------------------------
+# attach a charge-bath site carrying `dual(total_charge)` through a 1-dimensional
+# bond, so that the physical legs of the remaining vertices fuse to `total_charge`
+function _attach_bath(
+        pspaces::Dictionary{V, S}, vspaces::Dictionary{UndirectedEdge{V}, S},
+        total_charge, auxiliary,
+    ) where {V, S <: IndexSpace}
+    I = sectortype(S)
+    q = dual(_tosector(I, total_charge))
+    q == one(I) && return pspaces, vspaces
+
+    adj = adjacency(keys(vspaces))
+    aux = _bath_vertex(adj, keys(adj), auxiliary)
+    neighbor = _bath_neighbor(adj, keys(adj))
+    Q = S(q => 1)
+
+    return _augment(pspaces, aux, Q), _augment(vspaces, UndirectedEdge(aux, neighbor), Q)
+end
+
+for (f, f!) in ((:rand_state, :rand!), (:randn_state, :randn!))
+    @eval begin
+        function $f(
+                rng::Random.AbstractRNG, ::Type{T}, pspaces::Dictionary{V, S},
+                vspaces::Dictionary{UndirectedEdge{V}, S};
+                total_charge = nothing, auxiliary = nothing,
+            ) where {T, V, S <: IndexSpace}
+            if !isnothing(total_charge)
+                pspaces, vspaces = _attach_bath(pspaces, vspaces, total_charge, auxiliary)
+            end
+            return Random.$f!(rng, TensorNetworkState{T}(undef, pspaces, vspaces))
+        end
+        function $f(
+                rng::Random.AbstractRNG, ::Type{T}, topology, P::S, V::S; kwargs...
+            ) where {T, S <: IndexSpace}
+            return $f(rng, T, _spaces(topology, P, V)...; kwargs...)
+        end
+
+        $f(::Type{T}, pspaces::Dictionary, vspaces::Dictionary; kwargs...) where {T} =
+            $f(Random.default_rng(), T, pspaces, vspaces; kwargs...)
+        $f(::Type{T}, topology, P::IndexSpace, V::IndexSpace; kwargs...) where {T} =
+            $f(Random.default_rng(), T, topology, P, V; kwargs...)
+
+        $f(rng::Random.AbstractRNG, pspaces::Dictionary, vspaces::Dictionary; kwargs...) =
+            $f(rng, Float64, pspaces, vspaces; kwargs...)
+        $f(rng::Random.AbstractRNG, topology, P::IndexSpace, V::IndexSpace; kwargs...) =
+            $f(rng, Float64, topology, P, V; kwargs...)
+
+        $f(pspaces::Dictionary, vspaces::Dictionary; kwargs...) =
+            $f(Random.default_rng(), Float64, pspaces, vspaces; kwargs...)
+        $f(topology, P::IndexSpace, V::IndexSpace; kwargs...) =
+            $f(Random.default_rng(), Float64, topology, P, V; kwargs...)
+    end
+end
+
+@doc """
+    randn_state([rng], [T], pspaces, vspaces; total_charge = nothing, auxiliary = nothing)
+    randn_state([rng], [T], topology, P::IndexSpace, V::IndexSpace; kwargs...)
+
+Allocate a [`TensorNetworkState`](@ref) and fill it with normally distributed
+entries. Spaces are given either per vertex and per edge (`pspaces`, `vspaces`, as
+for the `undef` constructor) or uniformly as `P` and `V` over a `topology`, which is
+a vector of [`UndirectedEdge`](@ref)s or a `Graphs.AbstractGraph`.
+
+Filling graded tensors at random already yields a state of *trivial* total charge,
+since every on-site tensor conserves charge. To land in a different global sector,
+pass `total_charge`: a charge-bath vertex carrying the compensating charge is
+attached by a 1-dimensional bond, exactly as in [`product_state`](@ref) — it is an
+ordinary vertex of the result and should be left out of gate lists and observables.
+Note that the whole charge enters through that single 1-dimensional bond, so the
+result is generic within the target sector only up to that bottleneck.
+
+See also [`rand_state`](@ref), which draws uniformly instead.
+""" randn_state
+
+@doc """
+    rand_state([rng], [T], pspaces, vspaces; total_charge = nothing, auxiliary = nothing)
+    rand_state([rng], [T], topology, P::IndexSpace, V::IndexSpace; kwargs...)
+
+As [`randn_state`](@ref), but with uniformly distributed entries.
+""" rand_state
 
 
 # Properties
@@ -201,8 +290,9 @@ physicalspace(state::TensorNetworkState, vertex) = space(state[vertex], 1)
 
 Return the virtual space of `edge` as seen from `first(edge)`.
 
-By convention `virtualspace(state, edge) == dual(virtualspace(state, reverse(edge)))`:
-the non-dual side is the one with the smaller vertex.
+By convention `virtualspace(state, edge) == dual(virtualspace(state, reverse(edge)))`.
+The *stored* space of an edge is non-dual on its smaller-vertex side, but `space` dualizes
+domain legs, so the space returned here is non-dual when `first(edge) > last(edge)`.
 Throws `ArgumentError` if `edge` is not incident on `first(edge)`.
 """
 function virtualspace(state::TensorNetworkState, edge)
@@ -228,23 +318,25 @@ Return the on-site tensor at vertex `v`.
 
 Return `true` if `state` is internally consistent:
 
-- every tensor has no more virtual legs occupied than its vertex has neighbors, and any extra domain legs are unit spaces
-- every edge's virtual space is non-dual on the canonical (`first < last`) side and the dual of its reverse.
+- every vertex has at most as many neighbors as its tensor has domain legs, and the domain legs beyond its neighbors are unit spaces
+- every edge's virtual space is the dual of its reverse, and is stored non-dual on the canonical (`first < last`) side.
 """
 function check_consistency(state::TensorNetworkState)
     for v in vertices(state)
         t = state[v]
         adj = neighbors(state, v)
-        numin(t) <= length(adj) || return false
+        length(adj) <= numin(t) || return false
 
         for i in (length(adj) + 1):numin(t)
-            @assert isunitspace(domain(t)[i])
+            isunitspace(domain(t)[i]) || return false
         end
-
     end
     for edge in edges(state)
-        !isdual(virtualspace(state, edge)) || return false
-        virtualspace(state, edge) == dual(virtualspace(state, reverse(edge))) || return false
+        # `reverse` is the identity on an `UndirectedEdge`, so orient it to compare the two
+        # sides; `virtualspace` dualizes, hence the non-dual side is the *larger* vertex
+        e = DirectedEdge(edge)
+        isdual(virtualspace(state, e)) || return false
+        virtualspace(state, e) == dual(virtualspace(state, reverse(e))) || return false
     end
     return true
 end

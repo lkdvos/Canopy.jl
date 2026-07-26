@@ -32,13 +32,13 @@ julia --project=examples examples/free_fermion_honeycomb/main.jl
 ```
 
 ````julia
-using Canopy: TensorNetworkState, BPMessages, belief_propagation,
+using Canopy: randn_state, BPMessages, belief_propagation,
     UndirectedEdge, LocalGate, apply!, reduced_density_matrix, expect,
     Strang, trotterize, edge_coloring
 using TensorKit
 using TensorKitTensors.FermionOperators: f_num, f_hopping, fermion_space
 using MatrixAlgebraKit: truncrank, trunctol
-using Graphs: SimpleGraph, add_edge!, edges, src, dst, nv
+using Graphs: SimpleGraph, add_edge!, edges, src, dst
 using Random
 using Statistics: mean
 using Printf
@@ -109,10 +109,8 @@ function honeycomb_state(n1::Int, n2::Int, Dmax::Int; T::Type=ComplexF64)
     g = honeycomb_graph(n1, n2)
     P = fermion_space(Trivial)
     V = Vect[fℤ₂](0 => cld(Dmax, 2), 1 => fld(Dmax, 2))
-    st = TensorNetworkState{T}(undef, g, P, V)
-    Random.randn!(st)
     ekeys = [UndirectedEdge(src(e), dst(e)) for e in edges(g)]
-    return st, ekeys
+    return randn_state(T, g, P, V), ekeys
 end
 ````
 

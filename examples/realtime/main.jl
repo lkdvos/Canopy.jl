@@ -39,7 +39,7 @@ julia --project=examples examples/realtime/main.jl
 ```
 """
 
-using Canopy: hexagonal_lattice, product_state, BPMessages, belief_propagation,
+using Canopy: hexagonal_lattice, product_state, vertices, BPMessages, belief_propagation,
     UndirectedEdge, LocalGate, CompositeGate, Circuit, apply!, edge_coloring,
     expect, virtualspace
 using TensorKit
@@ -69,7 +69,7 @@ const CHIS = (4, 8, 16, 32)
 const BP_ITERS = 30           # per-step BP sweeps (warm-started from the previous step)
 
 const ES = hexagonal_lattice(M, N)                       # open-boundary honeycomb
-const VERTS = sort(unique(Iterators.flatten((e.src, e.dst) for e in ES)))
+const VERTS = sort(vertices(ES))
 const HOPOP = f_hopping(ComplexF64, Trivial)             # c†_i c_j + c†_j c_i
 
 md"""
@@ -99,10 +99,10 @@ md"""
 """
 
 function initial_state()
-    P = fermion_space(Trivial)
-    ps = Dictionary(VERTS, fill(P, length(VERTS)))
-    ls = Dictionary(VERTS, [fℤ₂(occ_of(v)) => [1.0] for v in VERTS])
-    return product_state(ComplexF64, ES, ps, ls)
+    ## The physical space is uniform, so it is passed as a single value; each local state is a
+    ## bare occupation sector, which is 1-dimensional in that space.
+    ls = Dictionary(VERTS, [fℤ₂(occ_of(v)) for v in VERTS])
+    return product_state(ComplexF64, ES, fermion_space(Trivial), ls)
 end
 
 md"""

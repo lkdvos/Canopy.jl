@@ -17,10 +17,7 @@ using Test
 # exercises `_mul_leg!`'s `twist`); U(1) checks graded blocking; bosonic checks
 # the plain index plumbing.
 
-_state_on(g, P, V; seed) = (
-    s = TensorNetworkState{ComplexF64}(undef, g, P, V);
-    Random.seed!(seed); Random.randn!(s); s
-)
+_state_on(g, P, V; seed) = (Random.seed!(seed); randn_state(ComplexF64, g, P, V))
 
 # (physical, virtual) space pairs spanning trivial / U(1) / fermionic symmetry.
 const _MSG_SPACES = (

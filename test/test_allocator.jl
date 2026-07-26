@@ -1,5 +1,5 @@
 using Canopy
-using Canopy: TensorNetworkState, BPMessages, belief_propagation, compute_message,
+using Canopy: BPMessages, belief_propagation, compute_message,
               LocalGate, apply!, physicalspace
 using TensorKit
 using TensorKit.TO: DefaultAllocator, DefaultBackend
@@ -23,8 +23,7 @@ const _SPACES = (
 )
 
 _state_on(g, P, V; seed) = (
-    s = TensorNetworkState{ComplexF64}(undef, g, P, V);
-    Random.seed!(seed); Random.randn!(s); (s, BPMessages(s))
+    Random.seed!(seed); s = randn_state(ComplexF64, g, P, V); (s, BPMessages(s))
 )
 
 # A representative two-site unitary from a random Hermitian generator.
