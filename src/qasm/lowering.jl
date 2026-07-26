@@ -7,35 +7,10 @@
 # which both respects that limit and keeps the number of truncating updates down.
 
 # --- gate tensors ------------------------------------------------------------
-# Most gates come straight from `TensorKitTensors.QuantumGates`. The ones defined
-# here are those it does not provide, chief among them the `U(θ, φ, λ)` primitive
-# of the language itself.
-
-"""
-    _u3(T, θ, φ, λ)
-
-The general single-qubit unitary of OpenQASM 2.0, `U(θ, φ, λ)`, in the convention
-of `qelib1.inc`'s `u3` (and hence of Qiskit's `UGate`).
-"""
-function _u3(::Type{T}, θ::Real, φ::Real, λ::Real) where {T <: Complex}
-    q = QG.qubit_space()
-    s, c = sincos(θ / 2)
-    return TensorMap(T[c (-cis(λ) * s); (cis(φ) * s) (cis(φ + λ) * c)], q ← q)
-end
-
-# The √X gate, `sx`. Equal to `Rx(π/2)` up to a global phase, which matters for
-# amplitudes even though it does not for expectation values.
-function _sx(::Type{T}) where {T <: Complex}
-    q = QG.qubit_space()
-    a, b = (1 + im) / 2, (1 - im) / 2
-    return TensorMap(T[a b; b a], q ← q)
-end
-
-# Controlled version of a single-qubit gate, with the control on the first slot.
-function _control(::Type{T}, u::AbstractTensorMap) where {T <: Complex}
-    q = QG.qubit_space()
-    return QG.proj_0(T) ⊗ id(T, q) + QG.proj_1(T) ⊗ u
-end
+# Every gate comes from `TensorKitTensors.QuantumGates`: the named ones directly,
+# `u3` for the `U(θ, φ, λ)` primitive of the language itself, and `controlled` for
+# the controlled family. The two spellings without their own constructor are
+# `sx = √X` and the `dg` (dagger) suffixes, which are just `sqrt` and `adjoint`.
 
 # Tensor for one primitive; the name/arity table lives in `_QASM_PRIMITIVES`.
 function _gate_tensor(::Type{T}, g::QASMGate) where {T <: Complex}
@@ -52,14 +27,14 @@ function _gate_tensor(::Type{T}, g::QASMGate) where {T <: Complex}
     n === :sdg && return QG.s_gate(T)'
     n === :t && return QG.t_gate(T)
     n === :tdg && return QG.t_gate(T)'
-    n === :sx && return _sx(T)
-    n === :sxdg && return _sx(T)'
-    n === :u1 && return QG.phase_shift(T; θ = p[1])
-    n === :rx && return QG.rotation_x(T; θ = p[1])
-    n === :ry && return QG.rotation_y(T; θ = p[1])
-    n === :rz && return QG.rotation_z(T; θ = p[1])
-    n === :u2 && return _u3(T, π / 2, p[1], p[2])
-    n === :u3 && return _u3(T, p[1], p[2], p[3])
+    n === :sx && return sqrt(QG.pauli_x(T))
+    n === :sxdg && return sqrt(QG.pauli_x(T))'
+    n === :u1 && return QG.phase_shift(T; theta = p[1])
+    n === :rx && return QG.rotation_x(T; theta = p[1])
+    n === :ry && return QG.rotation_y(T; theta = p[1])
+    n === :rz && return QG.rotation_z(T; theta = p[1])
+    n === :u2 && return QG.u3(T; theta = π / 2, phi = p[1], lambda = p[2])
+    n === :u3 && return QG.u3(T; theta = p[1], phi = p[2], lambda = p[3])
     n === :cx && return QG.cnot(T)
     n === :cy && return QG.cy(T)
     n === :cz && return QG.cz(T)
@@ -69,17 +44,18 @@ function _gate_tensor(::Type{T}, g::QASMGate) where {T <: Complex}
     n === :iswap && return QG.iswap(T)
     n === :dcx && return QG.dcx(T)
     n === :ecr && return QG.ecr(T)
-    n === :csx && return _control(T, _sx(T))
-    n === :cp && return QG.cphase(T; θ = p[1])
-    n === :crx && return _control(T, QG.rotation_x(T; θ = p[1]))
-    n === :cry && return _control(T, QG.rotation_y(T; θ = p[1]))
-    n === :crz && return _control(T, QG.rotation_z(T; θ = p[1]))
-    n === :rxx && return QG.rotation_xx(T; θ = p[1])
-    n === :ryy && return QG.rotation_yy(T; θ = p[1])
-    n === :rzz && return QG.rotation_zz(T; θ = p[1])
-    n === :rzx && return QG.rotation_zx(T; θ = p[1])
-    n === :cu3 && return _control(T, _u3(T, p[1], p[2], p[3]))
-    n === :cu && return _control(T, cis(p[4]) * _u3(T, p[1], p[2], p[3]))
+    n === :csx && return QG.controlled(sqrt(QG.pauli_x(T)))
+    n === :cp && return QG.cphase(T; theta = p[1])
+    n === :crx && return QG.controlled(QG.rotation_x(T; theta = p[1]))
+    n === :cry && return QG.controlled(QG.rotation_y(T; theta = p[1]))
+    n === :crz && return QG.controlled(QG.rotation_z(T; theta = p[1]))
+    n === :rxx && return QG.rotation_xx(T; theta = p[1])
+    n === :ryy && return QG.rotation_yy(T; theta = p[1])
+    n === :rzz && return QG.rotation_zz(T; theta = p[1])
+    n === :rzx && return QG.rotation_zx(T; theta = p[1])
+    n === :cu3 && return QG.controlled(QG.u3(T; theta = p[1], phi = p[2], lambda = p[3]))
+    n === :cu &&
+        return QG.controlled(cis(p[4]) * QG.u3(T; theta = p[1], phi = p[2], lambda = p[3]))
     throw(ArgumentError(lazy"no gate tensor available for `$n`"))
 end
 
