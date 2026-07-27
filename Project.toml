@@ -21,9 +21,8 @@ TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 VectorInterface = "409d34a3-91d5-4945-b6ec-7529ddf182d8"
 
 [sources]
-# TensorKitTensors 0.3 (the `QuantumGates` module) is not released yet: it lives in
-# QuantumKitHub/TensorKitTensors.jl#50. Remove this once it is registered.
-TensorKitTensors = {url = "https://github.com/QuantumKitHub/TensorKitTensors.jl", rev = "quantumgates"}
+# TODO: remove this once it is registered.
+TensorKitTensors = {url = "https://github.com/QuantumKitHub/TensorKitTensors.jl", rev = "main"}
 
 [compat]
 Adapt = "4"
