@@ -82,6 +82,50 @@ comment in `examples/realtime/main.jl` claiming otherwise is stale. So the effic
 one process per parameter point with `BLAS.set_num_threads(1)` (the default), packed densely
 into one allocation by disBatch. Do not ask for many threads per task.
 
+### Running on Rusty
+
+`slurm/disbatch.sbatch` takes a task file and runs it under disBatch:
+
+```bash
+# 1. generate the task file
+julia --project=scripts/hubbard_quench scripts/hubbard_quench/make_sweep.jl \
+      --chi 8 16 --U 0 4 --symmetry trivialtrivial u1u1 \
+      --outfile "$PWD/scripts/hubbard_quench/tryout.disbatch" \
+      --outroot "$PWD/scripts/hubbard_quench/results/tryout" \
+      --logdir  "$PWD/scripts/hubbard_quench/results/tryout/logs" \
+      -- --lattice hex --size 4 4 --dt 0.02 --tfinal 1.0 --measure-every 5 --site-resolved
+
+# 2. submit — `-n` is the concurrent task count, `-t` must cover the SLOWEST SINGLE task
+sbatch -n 8 -t 30:00 -p ccq scripts/hubbard_quench/slurm/disbatch.sbatch \
+       scripts/hubbard_quench/tryout.disbatch
+
+# 3. aggregate
+julia --project=scripts/hubbard_quench scripts/hubbard_quench/aggregate.jl \
+      --outroot scripts/hubbard_quench/results/tryout
+```
+
+Use **absolute** paths for `--outfile/--outroot/--logdir`: the task file's `#DISBATCH PREFIX`
+cds to the repo root, so relative paths happen to work, but only by coincidence.
+
+Two things the sbatch script does deliberately:
+
+- **`bash -l`** — a login shell, so juliaup's `julia` is on `PATH` and `module` works on the
+  compute node.
+- **A serial `Pkg.precompile()` before disBatch fans out.** Without it every task precompiles
+  the same ~50 packages simultaneously, contending for the same cache files under
+  `~/.julia/compiled` on GPFS and wasting minutes of allocation each. It also absorbs the case
+  where the compute nodes' CPU differs from whatever last precompiled, which silently
+  invalidates the cache. Consider `-C <arch>` to keep the cache warm across submissions.
+
+Sizing, measured on hex 4×4 (32 sites, χ=16, U(1)×U(1)) on a busy workstation: **2.8 s/step**,
+of which BP is 2.1 s. Add ~90 s of first-call JIT plus ~40 s for the first measurement, so a
+50-step task is ~5 min. Per-task JIT is the reason not to sweep very many very short runs — a
+sysimage would pay for itself there.
+
+Results are small CSVs, so `/mnt/home` is the right place for them. Move `--outroot` to
+`/mnt/ceph/users/$USER` only if you start writing site-resolved data for large lattices over
+long trajectories.
+
 ## Things that will bite you
 
 ### The truncation cutoff must stay above Canopy's gauge tolerance
