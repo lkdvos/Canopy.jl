@@ -51,3 +51,4 @@ Examples follow the MPSKit/PEPSKit Literate style so the rendered pages typeset 
 - `free_fermion_honeycomb` — spinless free fermions on the honeycomb lattice
 - `tfim_chain_ring` — transverse-field Ising model on a ring, compared to the exact Jordan–Wigner finite-`L` result
 - `realtime` — real-time quench of spinless free fermions on a 48-site hexagonal lattice in a staggered field, BP + truncation vs. the exact single-particle reference (reproduces `FreeFermionBenchmark.pdf`)
+- `qasm_circuit` — reading OpenQASM 2.0: a GHZ circuit from `ghz.qasm`, then a 16-qubit Trotterized TFIM quench compared against exact statevector evolution of the same circuit
