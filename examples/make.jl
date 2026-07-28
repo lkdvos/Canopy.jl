@@ -46,15 +46,21 @@ function build_example(name)
     out_dir = joinpath(OUTPUT_DIR, name)
     isfile(src_file) || return
     iscached(name) && return
+    # Auxiliary files travel with the example. They are copied *before* execution because
+    # Literate runs each code block with `@__DIR__` pointing at `out_dir`, so an example
+    # that reads its own data (e.g. `qasm_circuit/ghz.qasm`) needs them in place already.
+    # Figures written during execution land in `out_dir` for the same reason, and overwrite
+    # whatever a previous direct run of the example left in `src_dir/figs`.
+    mkpath(out_dir)
+    for f in filter(!=("main.jl"), readdir(src_dir))
+        cp(joinpath(src_dir, f), joinpath(out_dir, f); force = true)
+    end
     Literate.markdown(
         src_file, out_dir;
         execute = true, name = "index",
         mdstrings = true, credits = false,
         repo_root_url = "https://github.com/lkdvos/Canopy"
     )
-    for f in filter(!=("main.jl"), readdir(src_dir))
-        cp(joinpath(src_dir, f), joinpath(out_dir, f); force = true)
-    end
     return setcached(name)
 end
 

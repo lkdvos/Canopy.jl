@@ -26,6 +26,12 @@ using VectorInterface
 using Bumper: Bumper
 using Adapt: Adapt, adapt
 
+using TensorKitTensors: QuantumGates as QG
+using OpenQASM: OpenQASM
+using OpenQASM.RBNF: Token
+using OpenQASM.Types: RegDecl, Include, Gate, Instruction, UGate, CXGate, Barrier,
+    Measure, Reset, IfStmt, Opaque, Bit, Call, Neg
+
 include("bumper.jl")
 
 include("edges.jl")
@@ -62,5 +68,10 @@ export CompositeGate, Circuit
 
 include("operators/trotterize.jl")
 export TrotterScheme, Strang, trotterize, edge_coloring
+
+include("qasm/ir.jl")
+include("qasm/parse.jl")
+include("qasm/lowering.jl")
+export QASMCircuit, QASMStatement, QASMGate, read_qasm, parse_qasm, qasm_lattice
 
 end
