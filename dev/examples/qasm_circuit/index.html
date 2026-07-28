@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Running OpenQASM circuits · Canopy.jl</title><meta name="title" content="Running OpenQASM circuits · Canopy.jl"/><meta property="og:title" content="Running OpenQASM circuits · Canopy.jl"/><meta property="twitter:title" content="Running OpenQASM circuits · Canopy.jl"/><meta name="description" content="Documentation for Canopy.jl."/><meta property="og:description" content="Documentation for Canopy.jl."/><meta property="twitter:description" content="Documentation for Canopy.jl."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">Canopy.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../../design/">Design</a></li><li><a class="tocitem" href="../../states/">Constructing states</a></li><li><a class="tocitem" href="../../fermions/">Fermions</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../">Examples</a></li><li><a class="tocitem" href="../free_fermion_honeycomb/">Free fermions on a honeycomb lattice</a></li><li><a class="tocitem" href="../free_fermion_ring/">Free fermions on a ring</a></li><li class="is-active"><a class="tocitem" href>Running OpenQASM circuits</a><ul class="internal"><li><a class="tocitem" href="#A-GHZ-circuit-from-a-file"><span>A GHZ circuit from a file</span></a></li><li><a class="tocitem" href="#Putting-the-qubits-somewhere-else"><span>Putting the qubits somewhere else</span></a></li><li><a class="tocitem" href="#What-is-rejected"><span>What is rejected</span></a></li><li><a class="tocitem" href="#A-quench-of-the-transverse-field-Ising-model"><span>A quench of the transverse-field Ising model</span></a></li></ul></li><li><a class="tocitem" href="../realtime/">Real-time evolution of free fermions</a></li><li><a class="tocitem" href="../tfim_chain_ring/">Transverse-field Ising model on a ring</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Running OpenQASM circuits</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Running OpenQASM circuits</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/lkdvos/Canopy.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/lkdvos/Canopy.jl/blob/main/examples/qasm_circuit/main.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Running-OpenQASM-circuits"><a class="docs-heading-anchor" href="#Running-OpenQASM-circuits">Running OpenQASM circuits</a><a id="Running-OpenQASM-circuits-1"></a><a class="docs-heading-anchor-permalink" href="#Running-OpenQASM-circuits" title="Permalink"></a></h1><p>Circuits are usually authored somewhere else — a Qiskit script, a benchmark suite like QASMBench, a compiler pass — and exported as OpenQASM 2.0. Canopy reads such a file and runs it as a tensor-network state, so nothing has to be transcribed into <code>LocalGate</code>s by hand.</p><p>Reading is a two-step affair:</p><ol><li><code>read_qasm</code> (from a path) or <code>parse_qasm</code> (from a string) returns a <code>QASMCircuit</code> — a physics-agnostic description in which qubits are plain 1-based integers and gates are symbolic names with evaluated numeric parameters. Register flattening, broadcast statements (<code>h q;</code>), classical expressions (<code>rz(pi/2)</code>) and user-declared <code>gate</code>s are all resolved here.</li><li><code>Circuit(qc, state)</code> lowers that onto a <a href="../../states/#Canopy.TensorNetworkState"><code>TensorNetworkState</code></a>, producing a <code>Circuit</code> of <code>LocalGate</code>s that <code>apply!</code> accepts.</li></ol><p>Keeping the two apart is what makes the qubit-to-lattice question a <em>lowering</em> concern rather than a parsing one, and that is the interesting question here: a tensor-network state lives on a graph, and a two-site gate can only act on an edge of that graph.</p><p>We do two things below. First a GHZ circuit read from a file, which is exact and pins down the conventions. Then a 16-qubit Trotterized quench of the transverse-field Ising model, where bond truncation actually bites, benchmarked against exact statevector evolution of the very same circuit.</p><p>This example can be run from the command line with:</p><pre><code class="nohighlight hljs">julia --project=examples examples/qasm_circuit/main.jl</code></pre><pre><code class="language-julia hljs">using Canopy: read_qasm, parse_qasm, qasm_lattice, QASMCircuit, QASMStatement,
+    product_state, vertices, virtualspace, UndirectedEdge,
+    BPMessages, belief_propagation, Circuit, apply!, expect
+using TensorKit
+using TensorKitTensors.SpinOperators: σˣ, σᶻ
+using MatrixAlgebraKit: truncrank
+using Printf
+using CairoMakie
+
+const T = ComplexF64
+const P = ComplexSpace(2)
+const Z = σᶻ(T)
+const X = σˣ(T)</code></pre><pre><code class="nohighlight hljs">2←2 TensorMap{ComplexF64, TensorKit.ComplexSpace, 1, 1, Vector{ComplexF64}}:
+ codomain: ⊗(ℂ^2)
+ domain: ⊗(ℂ^2)
+ blocks: 
+ * Trivial() =&gt; 2×2 reshape(view(::Vector{ComplexF64}, 1:4), 2, 2) with eltype ComplexF64:
+ 0.0+0.0im  1.0+0.0im
+ 1.0+0.0im  0.0+0.0im</code></pre><h2 id="A-GHZ-circuit-from-a-file"><a class="docs-heading-anchor" href="#A-GHZ-circuit-from-a-file">A GHZ circuit from a file</a><a id="A-GHZ-circuit-from-a-file-1"></a><a class="docs-heading-anchor-permalink" href="#A-GHZ-circuit-from-a-file" title="Permalink"></a></h2><p><a href="ghz.qasm"><code>ghz.qasm</code></a> is what a six-qubit GHZ preparation looks like coming out of Qiskit: a <code>qreg</code>, an unused <code>creg</code>, a Hadamard, a <code>cx</code> ladder, and a trailing <code>barrier</code>.</p><pre><code class="language-julia hljs">print(read(joinpath(@__DIR__, &quot;ghz.qasm&quot;), String))</code></pre><pre><code class="nohighlight hljs">// GHZ state on six qubits, in the shape of a Qiskit `QuantumCircuit.qasm()` export.
+// The trailing `measure meas -&gt; q;` lines such an export ends with have been stripped:
+// Canopy simulates the state, not the measurement record.
+OPENQASM 2.0;
+include &quot;qelib1.inc&quot;;
+qreg q[6];
+creg meas[6];
+h q[0];
+cx q[0],q[1];
+cx q[1],q[2];
+cx q[2],q[3];
+cx q[3],q[4];
+cx q[4],q[5];
+barrier q[0],q[1],q[2],q[3],q[4],q[5];
+</code></pre><p><code>read_qasm</code> reduces that to the gates it applies. The <code>include &quot;qelib1.inc&quot;</code> is accepted and ignored (its gates are built in), the <code>creg</code> is recorded as declared and never used, and the <code>barrier</code> is kept as a marker — hence seven statements for six primitive gates.</p><pre><code class="language-julia hljs">qc = read_qasm(joinpath(@__DIR__, &quot;ghz.qasm&quot;))</code></pre><pre><code class="nohighlight hljs">QASMCircuit(6 qubits: q[6])
+  7 statements, 6 primitive gates</code></pre><h3 id="Choosing-the-lattice"><a class="docs-heading-anchor" href="#Choosing-the-lattice">Choosing the lattice</a><a id="Choosing-the-lattice-1"></a><a class="docs-heading-anchor-permalink" href="#Choosing-the-lattice" title="Permalink"></a></h3><p>The state has to live on a graph whose edges cover every two-qubit gate in the circuit. <code>qasm_lattice</code> reads that graph off the circuit itself, adding one edge per coupled pair, so no gate ever needs routing. For a <code>cx</code> ladder this is just an open chain.</p><pre><code class="language-julia hljs">edges = qasm_lattice(qc)</code></pre><pre><code class="nohighlight hljs">5-element Vector{Canopy.UndirectedEdge{Int64}}:
+ Canopy.UndirectedEdge{Int64}(1, 2)
+ Canopy.UndirectedEdge{Int64}(2, 3)
+ Canopy.UndirectedEdge{Int64}(3, 4)
+ Canopy.UndirectedEdge{Int64}(4, 5)
+ Canopy.UndirectedEdge{Int64}(5, 6)</code></pre><p>The circuit&#39;s connectivity is used verbatim, which is both the convenience and the catch: a densely connected circuit yields a densely connected network, on which belief propagation is a poor approximation. Supplying your own lattice is the escape hatch, shown in the next section.</p><h3 id="Lowering-and-applying"><a class="docs-heading-anchor" href="#Lowering-and-applying">Lowering and applying</a><a id="Lowering-and-applying-1"></a><a class="docs-heading-anchor-permalink" href="#Lowering-and-applying" title="Permalink"></a></h3><p>The initial state is the product state <span>$|0\cdots0\rangle$</span>; <code>Trivial() =&gt; [1.0, 0.0]</code> names the local state as the coefficients of <span>$|0\rangle$</span> in the (only) sector of a symmetry-free physical space.</p><p><code>Circuit(qc, state)</code> then maps qubit <code>i</code> onto vertex <code>i</code> — the default when the state has <code>Int</code> vertices — and turns each statement into a gate tensor. Six primitive gates give six gates here, but they would not in general: a statement supported on one or two qubits is contracted into a <em>single</em> tensor, so a user-declared <code>gate</code> expanding to a dozen primitives on two qubits still costs only one truncating update.</p><pre><code class="language-julia hljs">state = product_state(T, edges, P, Trivial() =&gt; [1.0, 0.0])
+msgs = BPMessages(state)
+circuit = Circuit(qc, state)
+
+state, msgs, info = apply!(state, msgs, circuit; trunc = truncrank(4))
+msgs = belief_propagation(msgs, state; maxiter = 200, tol = 1.0e-12)
+
+@printf &quot;%d statements → %d gates\n&quot; length(qc) length(circuit.gatelist)
+@printf &quot;truncation error: %.3e\n&quot; info.ϵ
+@printf &quot;bond dimensions:  %s\n&quot; join(dim.(virtualspace.(Ref(state), edges)), &quot;, &quot;)</code></pre><pre><code class="nohighlight hljs">7 statements → 6 gates
+truncation error: 0.000e+00
+bond dimensions:  2, 2, 2, 2, 2
+</code></pre><p>A GHZ state has bond dimension 2 everywhere, so nothing was truncated even though four was allowed. Its signature is that every spin is unpolarized while every pair is perfectly correlated: <span>$\langle \sigma^z_i \rangle = \langle \sigma^x_i \rangle = 0$</span> and <span>$\langle \sigma^z_i \sigma^z_j \rangle = 1$</span>. <code>expect</code> takes a single vertex for a one-site operator and an <code>UndirectedEdge</code> (or a pair of vertices) for a two-site one.</p><pre><code class="language-julia hljs">@printf &quot;⟨σᶻ⟩   = %s\n&quot; join((@sprintf(&quot;%+.3f&quot;, real(expect(state, msgs, Z, v))) for v in 1:6), &quot;  &quot;)
+@printf &quot;⟨σˣ⟩   = %s\n&quot; join((@sprintf(&quot;%+.3f&quot;, real(expect(state, msgs, X, v))) for v in 1:6), &quot;  &quot;)
+@printf &quot;⟨σᶻσᶻ⟩ = %s\n&quot; join((@sprintf(&quot;%+.3f&quot;, real(expect(state, msgs, Z ⊗ Z, e))) for e in edges), &quot;  &quot;)</code></pre><pre><code class="nohighlight hljs">⟨σᶻ⟩   = +0.000  +0.000  +0.000  +0.000  +0.000  +0.000
+⟨σˣ⟩   = +0.000  +0.000  +0.000  +0.000  +0.000  +0.000
+⟨σᶻσᶻ⟩ = +1.000  +1.000  +1.000  +1.000  +1.000
+</code></pre><h2 id="Putting-the-qubits-somewhere-else"><a class="docs-heading-anchor" href="#Putting-the-qubits-somewhere-else">Putting the qubits somewhere else</a><a id="Putting-the-qubits-somewhere-else-1"></a><a class="docs-heading-anchor-permalink" href="#Putting-the-qubits-somewhere-else" title="Permalink"></a></h2><p>When the circuit&#39;s own connectivity is not the lattice you want, pass both a lattice and a <code>qubitmap</code> saying which vertex each qubit occupies. Every two-qubit gate still has to land on an edge, but which edge is now up to you — and the lattice may carry edges the circuit never uses.</p><p>Here the same GHZ ladder goes onto a six-site <em>ring</em>, reversed, so that qubit <code>i</code> sits at vertex <code>7 - i</code>. The ladder occupies five of the ring&#39;s six edges and the closing edge <code>(6, 1)</code> stays idle.</p><pre><code class="language-julia hljs">ring = [UndirectedEdge(i, mod1(i + 1, 6)) for i in 1:6]
+ring_state = product_state(T, ring, P, Trivial() =&gt; [1.0, 0.0])
+ring_msgs = BPMessages(ring_state)
+
+ring_circuit = Circuit(qc, ring_state; qubitmap = 6:-1:1, layered = true)
+ring_state, ring_msgs, _ = apply!(ring_state, ring_msgs, ring_circuit; trunc = truncrank(4))
+ring_msgs = belief_propagation(ring_msgs, ring_state; maxiter = 200, tol = 1.0e-12)
+
+@printf &quot;⟨σᶻσᶻ⟩ = %s\n&quot; join(
+    (@sprintf(&quot;%+.3f&quot;, real(expect(ring_state, ring_msgs, Z ⊗ Z, e))) for e in ring), &quot;  &quot;
+)</code></pre><pre><code class="nohighlight hljs">⟨σᶻσᶻ⟩ = +1.000  +1.000  +1.000  +1.000  +1.000  +0.000
+</code></pre><p>The five ladder edges come out perfectly correlated as before, and the idle sixth edge comes out at zero — which is a useful thing to have seen, because the exact answer is 1: that edge joins qubits 6 and 1, and GHZ correlates <em>every</em> pair.</p><p>The reason is that <code>expect</code> on two sites is a Bethe estimate, not an exact contraction. It closes the environment with belief-propagation messages and contracts the two site tensors through the bond between them, and no gate ever raised that bond above dimension 1. A dimension-1 bond cannot carry correlation, so the estimate factorizes into two maximally mixed marginals. Correlations reach an observable only along bonds the circuit has actually used — worth remembering when choosing a lattice larger than the circuit needs.</p><h2 id="What-is-rejected"><a class="docs-heading-anchor" href="#What-is-rejected">What is rejected</a><a id="What-is-rejected-1"></a><a class="docs-heading-anchor-permalink" href="#What-is-rejected" title="Permalink"></a></h2><p>Canopy has no measurement, collapse or classical-register machinery, so <code>measure</code>, <code>reset</code>, <code>if</code> and <code>opaque</code> are errors rather than silent no-ops — strip them and simulate the state they act on. And since <code>apply!</code> implements one- and two-site gates only, a genuine three-qubit gate has to be decomposed upstream (Qiskit&#39;s transpiler will do it).</p><pre><code class="language-julia hljs">for src in (
+        &quot;OPENQASM 2.0;\nqreg q[1];\ncreg c[1];\nmeasure q[0] -&gt; c[0];\n&quot;,
+        &quot;OPENQASM 2.0;\nqreg q[3];\nccx q[0], q[1], q[2];\n&quot;,
+    )
+    try
+        qasm_lattice(parse_qasm(src))
+    catch err
+        println(err.msg)
+    end
+end</code></pre><pre><code class="nohighlight hljs">`measure` is not supported: Canopy has no measurement or classical-register machinery
+`ccx` acts on 3 qubits, but `apply!` implements only one- and two-site gates; decompose it into one- and two-qubit gates first
+</code></pre><h2 id="A-quench-of-the-transverse-field-Ising-model"><a class="docs-heading-anchor" href="#A-quench-of-the-transverse-field-Ising-model">A quench of the transverse-field Ising model</a><a id="A-quench-of-the-transverse-field-Ising-model-1"></a><a class="docs-heading-anchor-permalink" href="#A-quench-of-the-transverse-field-Ising-model" title="Permalink"></a></h2><p>Now a circuit where the tensor network is doing real work. We quench</p><p class="math-container">\[H = -J \sum_{\langle ij \rangle} \sigma^z_i \sigma^z_j - h \sum_i \sigma^x_i\]</p><p>on a ring of <span>$L = 16$</span> qubits at the critical point <span>$h = J = 1$</span>, starting from the fully polarized <span>$|0\cdots0\rangle$</span>, and follow the order parameter <span>$\langle \sigma^z \rangle(t) = L^{-1} \sum_i \langle \sigma^z_i \rangle$</span>.</p><p>The circuit is a first-order Trotter splitting of <span>$e^{-iHt}$</span>: per step, the <span>$\sigma^z\sigma^z$</span> bonds in two non-overlapping (even/odd) layers, then a transverse-field layer. In OpenQASM that is <code>rzz(-2 J dt)</code> and <code>rx(-2 h dt)</code>, since <code>rzz(θ) = exp(-i θ σᶻσᶻ / 2)</code> and <code>rx(θ) = exp(-i θ σˣ / 2)</code>.</p><p>We emit it as OpenQASM text rather than as Julia gates, which is the whole point of the example — and it lets the source exercise a few conveniences of the language: the bond gate is a user-declared <code>gate</code> whose body evaluates a classical expression, the field layer is a single statement broadcast over the whole register, and each step ends with a <code>barrier</code>.</p><pre><code class="language-julia hljs">const L = 16
+const J = 1.0
+const h = 1.0
+const DT = 0.1
+const NSTEPS = 25
+const CHIS = (2, 4, 8, 16, 32)
+
+function tfim_qasm(L, J, h, dt, nsteps)
+    io = IOBuffer()
+    println(io, &quot;OPENQASM 2.0;&quot;)
+    println(io, &quot;include \&quot;qelib1.inc\&quot;;&quot;)
+    println(io, &quot;gate ising(dt) a, b { rzz(-2*dt) a, b; }&quot;)
+    println(io, &quot;qreg q[$L];&quot;)
+    for _ in 1:nsteps
+        # even bonds, then odd bonds: two layers of mutually non-overlapping gates
+        for parity in (0, 1), i in parity:2:(L - 1)
+            println(io, &quot;ising($(J * dt)) q[$i], q[$(mod(i + 1, L))];&quot;)
+        end
+        println(io, &quot;rx(-2*$(h * dt)) q;&quot;)
+        println(io, &quot;barrier q;&quot;)
+    end
+    return String(take!(io))
+end
+
+qasm_source = tfim_qasm(L, J, h, DT, NSTEPS)
+println(join(split(qasm_source, &#39;\n&#39;)[1:14], &#39;\n&#39;), &quot;\n...&quot;)</code></pre><pre><code class="nohighlight hljs">OPENQASM 2.0;
+include &quot;qelib1.inc&quot;;
+gate ising(dt) a, b { rzz(-2*dt) a, b; }
+qreg q[16];
+ising(0.1) q[0], q[1];
+ising(0.1) q[2], q[3];
+ising(0.1) q[4], q[5];
+ising(0.1) q[6], q[7];
+ising(0.1) q[8], q[9];
+ising(0.1) q[10], q[11];
+ising(0.1) q[12], q[13];
+ising(0.1) q[14], q[15];
+ising(0.1) q[1], q[2];
+ising(0.1) q[3], q[4];
+...
+</code></pre><h3 id="Splitting-the-circuit-at-its-barriers"><a class="docs-heading-anchor" href="#Splitting-the-circuit-at-its-barriers">Splitting the circuit at its barriers</a><a id="Splitting-the-circuit-at-its-barriers-1"></a><a class="docs-heading-anchor-permalink" href="#Splitting-the-circuit-at-its-barriers" title="Permalink"></a></h3><p><code>parse_qasm</code> gives one <code>QASMCircuit</code> for the whole evolution, but we want an observable after every Trotter step. The IR is an ordinary struct holding statements in source order, so it can be cut into per-step circuits at the <code>barrier</code> markers.</p><pre><code class="language-julia hljs">qc_tfim = parse_qasm(qasm_source)
+
+function split_at_barriers(qc::QASMCircuit)
+    steps = QASMCircuit[]
+    chunk = QASMStatement[]
+    for stmt in qc.statements
+        if stmt.barrier
+            isempty(chunk) || push!(steps, QASMCircuit(qc.nqubits, qc.registers, chunk))
+            chunk = QASMStatement[]
+        else
+            push!(chunk, stmt)
+        end
+    end
+    isempty(chunk) || push!(steps, QASMCircuit(qc.nqubits, qc.registers, chunk))
+    return steps
+end
+
+steps = split_at_barriers(qc_tfim)
+@printf &quot;%d Trotter steps of %d statements each\n&quot; length(steps) length(first(steps))</code></pre><pre><code class="nohighlight hljs">25 Trotter steps of 32 statements each
+</code></pre><p><code>qasm_lattice</code> recovers the ring, including the bond that closes it. That loop is why belief propagation is genuinely an approximation here, and not merely a bookkeeping device as it was on the GHZ chain.</p><pre><code class="language-julia hljs">tfim_edges = qasm_lattice(qc_tfim)</code></pre><pre><code class="nohighlight hljs">16-element Vector{Canopy.UndirectedEdge{Int64}}:
+ Canopy.UndirectedEdge{Int64}(1, 2)
+ Canopy.UndirectedEdge{Int64}(3, 4)
+ Canopy.UndirectedEdge{Int64}(5, 6)
+ Canopy.UndirectedEdge{Int64}(7, 8)
+ Canopy.UndirectedEdge{Int64}(9, 10)
+ Canopy.UndirectedEdge{Int64}(11, 12)
+ Canopy.UndirectedEdge{Int64}(13, 14)
+ Canopy.UndirectedEdge{Int64}(15, 16)
+ Canopy.UndirectedEdge{Int64}(2, 3)
+ Canopy.UndirectedEdge{Int64}(4, 5)
+ Canopy.UndirectedEdge{Int64}(6, 7)
+ Canopy.UndirectedEdge{Int64}(8, 9)
+ Canopy.UndirectedEdge{Int64}(10, 11)
+ Canopy.UndirectedEdge{Int64}(12, 13)
+ Canopy.UndirectedEdge{Int64}(14, 15)
+ Canopy.UndirectedEdge{Int64}(1, 16)</code></pre><h3 id="Exact-reference"><a class="docs-heading-anchor" href="#Exact-reference">Exact reference</a><a id="Exact-reference-1"></a><a class="docs-heading-anchor-permalink" href="#Exact-reference" title="Permalink"></a></h3><p>At <span>$L = 16$</span> the full <span>$2^{16}$</span> statevector is cheap, so we can evolve it exactly and thereby isolate the <em>truncation</em> error: the reference applies the identical lowered gates, so the first-order Trotter error is common to both runs and cancels out of the comparison.</p><p>Those gates come straight off the lowered <code>Circuit</code>, whose <code>LocalGate</code>s carry their <code>sites</code> and their <code>tensor</code>. Dense leg <code>i</code> belongs to the <code>i</code>-th vertex of <code>vertices(state)</code>; that iteration order is insertion order rather than sorted order, so it is read off the state instead of assumed.</p><pre><code class="language-julia hljs">function dense_apply(ψ::Array{T}, circuit, pos)
+    n = ndims(ψ)
+    for g in circuit.gatelist
+        k = length(g.sites)
+        u = reshape(convert(Array, g.tensor), 2^k, 2^k)
+        legs = [pos[s] for s in g.sites]
+        # bring the target legs to the front, hit them with the gate matrix, put them back
+        perm = vcat(legs, setdiff(1:n, legs))
+        φ = u * reshape(permutedims(ψ, perm), 2^k, :)
+        ψ = permutedims(reshape(φ, ntuple(_ -&gt; 2, n)), invperm(perm))
+    end
+    return ψ
+end
+
+# L⁻¹ Σᵢ ⟨σᶻᵢ⟩ of a (not necessarily normalized) dense statevector
+function dense_mz(ψ::Array{T})
+    n = ndims(ψ)
+    return sum(1:n) do d
+        A = reshape(ψ, 2^(d - 1), 2, :)
+        return sum(abs2, view(A, :, 1, :)) - sum(abs2, view(A, :, 2, :))
+    end / (n * sum(abs2, ψ))
+end
+
+function run_exact(steps, edges)
+    state = product_state(T, edges, P, Trivial() =&gt; [1.0, 0.0])
+    pos = Dict(v =&gt; i for (i, v) in enumerate(vertices(state)))
+    n = length(pos)
+    ψ = zeros(T, ntuple(_ -&gt; 2, n))
+    ψ[ntuple(_ -&gt; 1, n)...] = 1
+    mz = [dense_mz(ψ)]
+    for s in steps
+        ψ = dense_apply(ψ, Circuit(s, state), pos)
+        push!(mz, dense_mz(ψ))
+    end
+    return mz
+end</code></pre><pre><code class="nohighlight hljs">run_exact (generic function with 1 method)</code></pre><h3 id="The-tensor-network-run"><a class="docs-heading-anchor" href="#The-tensor-network-run">The tensor-network run</a><a id="The-tensor-network-run-1"></a><a class="docs-heading-anchor-permalink" href="#The-tensor-network-run" title="Permalink"></a></h3><p>One <code>apply!</code> per Trotter step, re-converging the belief-propagation messages afterwards so that the next step&#39;s truncations are taken in a well-gauged basis, and measuring in between. <code>truncrank(χ)</code> caps every bond at <code>χ</code>.</p><p>This is also where <code>layered = true</code> earns its keep: within a step the even bonds, the odd bonds and the field layer are each sets of mutually non-overlapping gates, and the <code>barrier</code> prevents a layer from straddling two steps.</p><pre><code class="language-julia hljs">function run_bp(steps, edges, χ)
+    state = product_state(T, edges, P, Trivial() =&gt; [1.0, 0.0])
+    msgs = BPMessages(state)
+    circuits = [Circuit(s, state; layered = true) for s in steps]
+
+    mz = [sum(real(expect(state, msgs, Z, v)) for v in 1:L) / L]
+    ϵmax = 0.0
+    for circuit in circuits
+        state, msgs, info = apply!(state, msgs, circuit; trunc = truncrank(χ))
+        msgs = belief_propagation(msgs, state; maxiter = 200, tol = 1.0e-10)
+        ϵmax = max(ϵmax, info.ϵ)
+        push!(mz, sum(real(expect(state, msgs, Z, v)) for v in 1:L) / L)
+    end
+    return mz, ϵmax
+end</code></pre><pre><code class="nohighlight hljs">run_bp (generic function with 1 method)</code></pre><h3 id="Sweep-and-compare"><a class="docs-heading-anchor" href="#Sweep-and-compare">Sweep and compare</a><a id="Sweep-and-compare-1"></a><a class="docs-heading-anchor-permalink" href="#Sweep-and-compare" title="Permalink"></a></h3><pre><code class="language-julia hljs">ts = DT .* (0:NSTEPS)
+
+println(&quot;TFIM quench  L=$L  J=$J  h=$h  dt=$DT  steps=$NSTEPS&quot;)
+mz_exact = run_exact(steps, tfim_edges)
+
+mz_bp = Dict{Int, Vector{Float64}}()
+@printf &quot;  %-5s  %-13s  %-13s  %-10s\n&quot; &quot;χ&quot; &quot;⟨σᶻ⟩(t=2.5)&quot; &quot;max |Δ⟨σᶻ⟩|&quot; &quot;max ϵ&quot;
+for χ in CHIS
+    mz, ϵmax = run_bp(steps, tfim_edges, χ)
+    mz_bp[χ] = mz
+    @printf &quot;  %-5d  %-13.9f  %-13.3e  %-10.2e\n&quot; χ mz[end] maximum(abs, mz - mz_exact) ϵmax
+    flush(stdout)
+end
+@printf &quot;  %-5s  %-13.9f\n&quot; &quot;exact&quot; mz_exact[end]</code></pre><pre><code class="nohighlight hljs">TFIM quench  L=16  J=1.0  h=1.0  dt=0.1  steps=25
+  χ      ⟨σᶻ⟩(t=2.5)    max |Δ⟨σᶻ⟩|    max ϵ     
+  2      0.120858206    7.142e-02      8.14e-02  
+  4      0.051713053    2.274e-03      5.86e-02  
+  8      0.049434482    5.080e-06      7.90e-03  
+  16     0.049438800    1.991e-08      1.04e-04  
+  32     0.049438820    4.710e-13      3.72e-07  
+  exact  0.049438820  
+</code></pre><p>The order parameter decays from 1 towards 0, and the tensor-network curves converge onto the exact one exponentially in <span>$\chi$</span>: at <span>$\chi = 4$</span> the worst-case deviation over the whole trajectory is already <span>$\sim 2 \times 10^{-3}$</span>, and by <span>$\chi = 32$</span> the circuit is reproduced to below <span>$10^{-12}$</span>.</p><p>That last number also says something about the loop: since raising <span>$\chi$</span> alone drives the error to <span>$10^{-13}$</span>, the Bethe approximation on this ring costs at most that much for these observables. Bond truncation, not belief propagation, is the accuracy bottleneck here.</p><p><code>max ϵ</code> is the largest discarded weight over all steps and bonds. It runs one to two orders of magnitude above the error in <span>$\langle \sigma^z \rangle$</span> — local observables are far less sensitive than the full wavefunction — but it falls with <span>$\chi$</span> in step with it, which makes it the quantity to watch when no exact reference is at hand.</p><pre><code class="language-julia hljs">let
+    fig = Figure(size = (720, 720))
+    colors = Makie.wong_colors()
+
+    ax1 = Axis(
+        fig[1, 1]; xlabel = &quot;t&quot;, ylabel = &quot;⟨σᶻ⟩&quot;,
+        title = &quot;TFIM quench from |0…0⟩, ring L=$L, h=J=$J&quot;
+    )
+    lines!(ax1, ts, mz_exact; color = :black, linewidth = 3, label = &quot;exact statevector&quot;)
+    for (i, χ) in enumerate(CHIS)
+        scatterlines!(ax1, ts, mz_bp[χ]; color = colors[i], markersize = 7, label = &quot;χ = $χ&quot;)
+    end
+    axislegend(ax1; position = :rt)
+
+    # same colours as above, so this panel needs no legend of its own
+    ax2 = Axis(
+        fig[2, 1]; xlabel = &quot;t&quot;, ylabel = &quot;|Δ⟨σᶻ⟩|&quot;, yscale = log10,
+        title = &quot;deviation from the exact circuit&quot;
+    )
+    for (i, χ) in enumerate(CHIS)
+        # t = 0 is exact by construction and would fall off a log axis
+        err = max.(abs.(mz_bp[χ] - mz_exact)[2:end], 1.0e-16)
+        scatterlines!(ax2, ts[2:end], err; color = colors[i], markersize = 7)
+    end
+    linkxaxes!(ax1, ax2)
+
+    outdir = joinpath(@__DIR__, &quot;figs&quot;); mkpath(outdir)
+    outfile = joinpath(outdir, &quot;qasm_circuit.svg&quot;)
+    save(outfile, fig)
+    println(&quot;wrote $outfile&quot;)
+    fig
+end</code></pre><pre><code class="nohighlight hljs">wrote /mnt/home/ldevos/Projects/Canopy/QASM/docs/src/examples/qasm_circuit/figs/qasm_circuit.svg
+</code></pre><p><img src="figs/qasm_circuit.svg" alt="TFIM quench from an OpenQASM circuit"/></p><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../free_fermion_ring/">« Free fermions on a ring</a><a class="docs-footer-nextpage" href="../realtime/">Real-time evolution of free fermions »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 28 July 2026 18:00">Tuesday 28 July 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
