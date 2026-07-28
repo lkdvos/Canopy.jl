@@ -11,14 +11,13 @@ updates:
     #     patterns:
     #       - "*"
   - package-ecosystem: "julia"
-    directories:
-      - "/"
-      - "/docs"
-      - "/test"
+    # Only the root: it declares a [workspace] spanning test/, docs/, examples/ and benchmark/,
+    # so dependabot already resolves every sub-project from here. Listing them separately just
+    # produces duplicate PRs for the same edit.
+    directory: "/"
     schedule:
       interval: "weekly"
-    # To group all Julia dependency updates into a single PR, uncomment the following:
-    # groups:
-    #   julia-dependencies:
-    #     patterns:
-    #       - "*"
+    groups:
+      julia-dependencies:
+        patterns:
+          - "*"
