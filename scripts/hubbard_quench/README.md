@@ -150,6 +150,40 @@ the order parameter against the exact result:
 `--cutoff` is `1.8e-10` and the driver warns if you go below it. **The TNQS script's
 `cutoff = 1e-14` is below the floor and removes nothing** — do not carry it over.
 
+### χ-convergence is not accuracy: BP loop error sets the real floor
+
+Measured on hex 4×4 (32 sites, 40 edges → 9 independent loops), CDW quench at `U = 0`,
+`dt = 0.02`, `T = 1.0`, against the exact free-fermion result:
+
+| χ | `eps_cum` (discarded weight) | m_s(T=1) | \|err\| |
+|---|---|---|---|
+| 8 | 9.7e-1 | −0.2509 | 1.07e-2 |
+| 16 | 3.4e-1 | −0.1596 | 1.02e-1 |
+| 32 | 9.0e-2 | −0.1597 | 1.020e-1 |
+| 64 | 1.1e-2 | −0.1601 | 1.015e-1 |
+
+Truncation error falls by ~100× while the error against the exact result **saturates at
+1.0e-1**: the state converges in χ to a well-defined answer of −0.160 that is simply wrong
+(exact: −0.262). That residual is the Bethe/BP approximation to the reduced density matrix,
+which is uncontrolled on a loopy graph and does not improve with χ. `bp_resid` is ~1e-11
+throughout, so this is BP's *fixed point* being wrong, not BP failing to converge.
+
+Two practical consequences:
+
+- **A χ-scan alone will mislead you.** Watching m_s stabilize between χ=16 and χ=64 reads as
+  "converged" when it is off by 39%. And note χ=8 has the *smallest* error here purely by
+  cancellation — heavier truncation happens to suppress the correlations BP mishandles. Never
+  rank χ values by agreement with the reference without also checking `eps_cum`.
+- **Past the loop-error onset, χ is not the bottleneck, so symmetry does not buy accuracy.**
+  Symmetry buys reachable χ; if χ is already past the point where it matters, that is not the
+  constraint. To go further you need a better environment (loop-corrected BP or boundary-MPS
+  environments, both listed as planned in Canopy's `docs/src/design.md`) or a less loopy
+  geometry.
+
+On this geometry BP tracks the exact result to ~2e-5 at T=0.2 and ~1e-3 at T=0.4, with the
+loop error taking over from roughly T≈0.4. Establish that horizon for your lattice with a
+`U = 0` run before trusting `U ≠ 0` results at the same times.
+
 ### The charge bath is a real extra vertex
 
 Particle-U(1) at half filling has total charge `Q = N ≠ 0`, so `product_state` attaches an
