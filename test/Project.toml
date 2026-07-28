@@ -12,8 +12,5 @@ TensorKitTensors = "41b62e7d-e9d1-4e23-942c-79a97adf954b"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
-Bumper = "0.7"
-ParallelTestRunner = "2"
-TensorKit = "0.17"
-TensorKitTensors = "0.3"
+ParallelTestRunner = "2.6.3"
 Test = "1"
