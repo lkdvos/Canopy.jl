@@ -59,6 +59,14 @@ function parse_cli(args)
         "--outroot"
         help = "results root handed to run.jl"
         default = joinpath(@__DIR__, "results")
+        "--julia"
+        help = "julia binary the tasks invoke. Defaults to the one running this script, by \
+                absolute path — do NOT emit a bare `julia`: with juliaup installed on a \
+                workstation's local disk (/home/\$USER/.juliaup) the name does not resolve on \
+                compute nodes at all. Sys.BINDIR points at the real toolchain under \
+                ~/.julia/juliaup on shared home, which every node can see, and is the same \
+                Julia that resolved this project's Manifest."
+        default = joinpath(Sys.BINDIR, "julia")
         "passthrough"
         help = "extra run.jl flags (after --)"
         nargs = '*'
@@ -100,9 +108,16 @@ function (@main)(args)
         # PREFIX/SUFFIX keep the per-task lines short and put every task's output in its own
         # file. `JULIA_NUM_THREADS=1` and run.jl's `--blas-threads 1` default keep each task
         # on one core, so disBatch can pack the allocation densely.
+        julia = o["julia"]
+        isfile(julia) || @warn "julia binary does not exist; tasks will fail" julia
+        startswith(julia, "/home/") && @warn """
+            The julia path is under /home, which is node-local NVMe — compute nodes cannot see \
+            it and every task will fail with `No such file or directory`. Pass --julia with a \
+            path under /mnt/home.
+            """ julia
         println(
             io,
-            "#DISBATCH PREFIX cd $(REPO) && JULIA_NUM_THREADS=1 julia --project=$(dirname(RUNNER)) $(RUNNER) "
+            "#DISBATCH PREFIX cd $(REPO) && JULIA_NUM_THREADS=1 $(julia) --project=$(dirname(RUNNER)) $(RUNNER) "
         )
         println(io, "#DISBATCH SUFFIX  > $(o["logdir"])/task_\${DISBATCH_TASKID}.log 2>&1")
         for pt in points
