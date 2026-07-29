@@ -94,6 +94,31 @@ if [[ ! -f "$PROJECT/Project.toml" ]]; then
     exit 1
 fi
 
+# --- one folder per job for every log this run produces ------------------------------------
+#
+# Without this, Slurm's own log lands wherever the job was submitted from (the repo root) and
+# disBatch drops ~9 driver/engine/status files next to the task file — i.e. loose in the source
+# tree, one set per job. Everything goes under <outroot>/_run/<jobid>/ instead:
+#
+#   slurm.log      this script's stdout/stderr
+#   disbatch_*     disBatch driver, engine, kvsinfo and status files
+#   tasks/         one log per task
+#
+# `--output` cannot be used for this: Slurm expands it at submit time, before the script runs,
+# so it cannot depend on anything computed here. The redirect below covers everything after the
+# banner; the file named by `--output` keeps the banner and a pointer to the run folder.
+OUTROOT="$(sed -n 's/^#HQ OUTROOT //p' "$TASKFILE" | head -1)"
+[[ -n "$OUTROOT" ]] || OUTROOT="$(dirname "$TASKFILE")"
+RUNDIR="$OUTROOT/_run/${SLURM_JOB_ID:-local}"
+mkdir -p "$RUNDIR/tasks"
+
+# Per-task logs land in this job's folder (the task file falls back to its own default if this
+# is unset, so running the task file by hand still works).
+export HQ_TASKLOG_DIR="$RUNDIR/tasks"
+
+echo "hubbard-quench job ${SLURM_JOB_ID:-local}: all logs under $RUNDIR"
+exec >> "$RUNDIR/slurm.log" 2>&1
+
 # One core per task, and keep BLAS from oversubscribing inside each task.
 export JULIA_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
@@ -102,6 +127,7 @@ export OMP_NUM_THREADS=1
 module -q load modules/2.4-20250724
 module -q load disBatch
 
+echo "run folder    : $RUNDIR"
 echo "host          : $(hostname)"
 echo "julia         : $JULIA ($("$JULIA" --version))"
 echo "disBatch      : $(command -v disBatch)"
@@ -127,8 +153,7 @@ echo
 # The task file's PREFIX invokes `julia` by bare name, so make the one we resolved win.
 export PATH="$(dirname "$JULIA"):$PATH"
 
-# Keep disBatch's own log/status files beside the task file, not in the submit cwd.
-PREFIX="${TASKFILE%.disbatch}_${SLURM_JOB_ID:-local}_"
+PREFIX="$RUNDIR/disbatch_"
 
 started=$SECONDS
 

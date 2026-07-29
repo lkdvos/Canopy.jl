@@ -60,6 +60,26 @@ results/hex6x6_cdw_U4_t-1_dt0.01_T1_chi16_sym-u1u1_bp30-1e-10/
 Rows are appended and flushed as they are produced, so a job killed at the wall clock keeps
 everything computed up to that point.
 
+Every log a cluster job produces is collected under the results root, one folder per job:
+
+```
+results/<sweep>/_run/<jobid>/
+  slurm.log        the batch script's own output
+  disbatch_*       disBatch driver, engine, kvsinfo and status files
+  tasks/task_N.log one per task
+```
+
+`slurm/disbatch.sbatch` does this by reading the `#HQ OUTROOT` header that `make_sweep.jl`
+writes into the task file. Two wrinkles worth knowing:
+
+- **Slurm's `--output` cannot point here on its own** — Slurm expands it at submit time, before
+  the script runs, so it cannot depend on the task file. `make_sweep.jl` prints a recommended
+  `sbatch` line with `--output=<outroot>/_run/slurm-%j.log`; without it the job's top-level log
+  lands in whatever directory you submitted from (the script still redirects everything after
+  the banner into the run folder, so only a one-line pointer is left behind).
+- Per-task logs follow `HQ_TASKLOG_DIR`, which the batch script exports. The task file falls
+  back to its own `--logdir` when that is unset, so running a task file by hand still works.
+
 `observables.csv` columns: `step, time, m_s_all, m_s_bulk, n_mean, docc_mean, E_kin, E_int,
 E_tot, ref_circuit, ref_cont, maxdim, nsectors_max, maxsecdim, eps_max, eps_sum, eps_cum,
 logl_cum, bp_resid`.

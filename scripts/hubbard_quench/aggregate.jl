@@ -367,7 +367,8 @@ function (@main)(args)
     isdir(root) || error("no such directory: $root")
 
     # Skip our own output directories, so re-aggregating an already-aggregated root works.
-    skip = ("figs", "logs")
+    # `_run` holds the per-job Slurm/disBatch logs written by slurm/disbatch.sbatch.
+    skip = ("figs", "logs", "_run")
     dirs = sort(
         [
             joinpath(root, d) for d in readdir(root)
