@@ -195,6 +195,12 @@ function figure_breakdown(pts, chis, syms, figdir)
     series!(ax2, pts, syms, r -> r.bp)
     axislegend(ax2; position = :lt, framevisible = false, labelsize = 11, labelcolor = INK2)
 
+    # Share one y-scale across the gate and BP panels: the whole point is that BP overtakes the
+    # gates for the symmetric runs, and independent autoscaled axes would hide the crossing by
+    # rescaling each panel to fill its own frame.
+    linkyaxes!(ax1, ax2)
+    ax2.ylabel = ""
+
     ax3 = Axis(
         fig[1, 3]; axis_kw(
             xlabel = "bond dimension χ", ylabel = "BP share of step (%)",

@@ -189,13 +189,19 @@ function panel_error!(ax, sub, chis, colors)
     return drew
 end
 
+# `--no-energy` records NaN rather than `missing`, so an `ismissing`-only guard silently draws
+# invisible NaN lines and leaves an empty panel. Treat both as absent, and report which.
+_absent(x) = ismissing(x) || (x isa Real && isnan(x))
+
 function panel_energy!(ax, sub, chis, colors)
+    drew = false
     for (k, χ) in enumerate(chis)
         d = sort(sub[sub.chi .== χ, :], :step)
-        all(ismissing, d.E_tot) && continue
+        all(_absent, d.E_tot) && continue
         lines!(ax, d.time, d.E_tot; color = colors[k], linewidth = 2, label = "χ=$χ")
+        drew = true
     end
-    return ax
+    return drew
 end
 
 # Walltime vs χ, one line per (symmetry, U). Log-log, because the question is the scaling
@@ -305,8 +311,18 @@ function make_figures(df, figdir)
                 title = "Energy drift (exact ≡ 0)", backgroundcolor = "#fcfcfb"
             )...
         )
-        panel_energy!(ax3, g, chis, colors)
-        axislegend(ax3; position = :lt, framevisible = false, labelsize = 11)
+        if panel_energy!(ax3, g, chis, colors)
+            axislegend(ax3; position = :lt, framevisible = false, labelsize = 11)
+        else
+            limits!(ax3, 0, 1, -1, 1)
+            text!(
+                ax3, 0.5, 0.5;
+                text = "energy not measured\n(run used --no-energy)",
+                align = (:center, :center), space = :relative, color = REF_COLOR,
+                fontsize = 12,
+            )
+            hidedecorations!(ax3; label = false)
+        end
 
         Label(fig[0, :], title; fontsize = 14, font = :bold, color = "#0b0b0b")
         slug = replace("$(key.lattice)$(key.size)_$(key.quench)_U$(key.U)_$(key.symmetry)", "/" => "-")
