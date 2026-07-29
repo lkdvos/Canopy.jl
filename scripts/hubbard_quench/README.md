@@ -192,6 +192,56 @@ auxiliary charge-bath vertex that appears in `vertices(state)`, `length(state)` 
 behave differently. Everything here iterates the module's own `lat.verts` / `lat.edges`; if
 you extend it, do the same. `params.toml` records `charge_bath`.
 
+### Where symmetry starts winning: χ ≈ 24–64, and BP is what holds it back
+
+Measured on hex 4×4 (32 sites), `U = 4`, `dt = 0.02`, icelake, one core per run. Cost is the
+median over steps whose bonds had actually reached χ (see the `nsat` caveat below).
+
+| χ | trivial/trivial | u1/trivial | trivial/u1 | u1/u1 |
+|---|---|---|---|---|
+| 8 | **0.14 s** | 0.42 s | 0.43 s | 1.38 s |
+| 16 | **0.43 s** | 0.78 s | 0.73 s | 2.54 s |
+| 24 | 1.03 s | **0.97 s** | 1.08 s | 4.05 s |
+| 32 | 2.27 s | **1.51 s** | 1.70 s | 4.97 s |
+| 48 | 7.67 s | 3.86 s | **3.45 s** | 7.97 s |
+| 64 | 14.4 s | **6.07 s** | 6.38 s | 11.8 s |
+| 96 | 27.2 s | **10.6 s** | 14.1 s | 17.2 s |
+| 128 | 51.1 s | **19.1 s** | 23.4 s | 19.4 s |
+
+Crossover against no symmetry: **particle-U(1) at χ ≈ 24, spin-U(1) at χ ≈ 32, both together
+at χ ≈ 64.** By χ=96–128 any single U(1) is ~2.5× faster. `u1/u1` starts worst (10× slower at
+χ=8, it carries the most sectors and so the most per-block overhead) but improves fastest and
+has caught `u1/trivial` by χ=128.
+
+Splitting the cost shows what is actually going on — and where to optimise:
+
+| χ=128 | gates | BP | BP share |
+|---|---|---|---|
+| trivial/trivial | 47.98 s | 3.11 s | 6% |
+| u1/trivial | 11.44 s | 7.64 s | 40% |
+| u1/u1 | **5.56 s** | 13.84 s | **71%** |
+
+Symmetry makes the *gates* **8.6× cheaper** at χ=128 (48.0 → 5.6 s) — and that ratio is still
+growing (1.6× at χ=32, 4.5× at 64, 5.0× at 96, 8.6× at 128). But it makes *BP* **4.5× more
+expensive** (3.1 → 13.8 s), and BP then consumes 71% of the symmetric run.
+
+So the 2.6× net speedup understates what symmetry is worth here: **belief propagation is the
+bottleneck**, not the simple update. BP messages are `χ × χ` per bond and the vertex-centric
+kernel contracts many small blocks; that is where a block-sparse optimisation would pay. Fix
+BP and the `u1/u1` advantage should approach the gate ratio.
+
+Two caveats on the table:
+
+- The χ=128 row rests on 1–4 saturated steps (`nsat`), so treat it as provisional; χ ≤ 96 has
+  ≥4 and is solid.
+- `nsat` matters because from a product state the bond dimension is **entanglement-limited, not
+  rank-limited**: with a discard threshold it climbs gradually (at χ=128: 22, 29, 39, 44, 53,
+  63, 77, 85, 99, 107, 118, 128 over twelve steps). Timing a short run therefore measures the
+  cost at some intermediate bond dimension, not at χ — it made dense χ=64 read 9.5 s/step
+  instead of 14.4 s and flattened the cost curve enough to hide the crossovers entirely.
+  `aggregate.jl` now medians only over saturated steps and flags thin rows. **Budget enough
+  `--nsteps` that large χ saturates**, or the benchmark quietly measures the wrong thing.
+
 ### Symmetry buys walltime, not accuracy at fixed χ
 
 Worth knowing before you sweep, because the naive expectation is backwards. All symmetry
