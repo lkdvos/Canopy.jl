@@ -11,7 +11,29 @@ Starting from a product state (a global AFM/CDW, or a doublon+hole in an AFM bac
 this tracks the staggered order parameter against the exact free-fermion result at `U = 0`
 and against energy conservation at `U ≠ 0`.
 
-This is a Canopy port of a TensorNetworkQuantumSimulator script (`../../hubbard_tnqs.jl`).
+It is a port of a TensorNetworkQuantumSimulator script (not included here — it depends on a
+different library), with symmetry treated as a first-class parameter.
+
+## What this found
+
+Four results that came out of using it, each documented in full under
+[Things that will bite you](#things-that-will-bite-you):
+
+1. **The truncation cutoff is a correctness parameter, not a tuning knob.** Below Canopy's gauge
+   tolerance (~1.8e-12) the gauge pseudo-inverse amplifies numerically-null Schmidt directions.
+   The failure is silent and *anti-convergent* — reported truncation error shrinks while
+   observables go wrong, worse at larger χ. The source script's `cutoff = 1e-14` is below the
+   floor; the default here is 100× the gauge tolerance and `truncation` warns below it.
+2. **χ-convergence is not accuracy.** On hex 4×4 the error against the exact free-fermion result
+   saturates at 1.0e-1 while discarded weight falls 100×: the state converges in χ to a
+   well-defined *wrong* answer, because BP's Bethe approximation is uncontrolled on a loopy
+   graph. Establish the horizon with a `U = 0` run before trusting `U ≠ 0` at the same times.
+3. **Symmetry buys walltime, not accuracy at fixed χ** — and it only pays above χ ≈ 32–64. Both
+   U(1)s together is the right choice at large χ (3.96× at χ=128, 3.3× faster than either alone
+   at χ=256), but it is the *slowest* option below χ ≈ 48.
+4. **Belief propagation, not the simple update, is the bottleneck for symmetric runs.** Symmetry
+   makes the gates 15.7× cheaper at χ=128 while BP stays flat, leaving BP at 57–82% of a step.
+   A block-sparse message kernel is what would unlock the rest.
 
 ## Layout
 
@@ -20,7 +42,9 @@ This is a Canopy port of a TensorNetworkQuantumSimulator script (`../../hubbard_
 | `HubbardQuench.jl` | physics: symmetries, local states, lattices, gates, observables, references |
 | `run.jl` | CLI driver — one parameter point per invocation |
 | `make_sweep.jl` | emits a disBatch task file for a parameter sweep |
-| `aggregate.jl` | result folders → `summary.csv` + figures |
+| `slurm/disbatch.sbatch` | runs a task file under disBatch in one allocation |
+| `aggregate.jl` | result folders → `summary.csv` + per-run figures + timing/crossover report |
+| `plot_benchmark.jl` | symmetry-benchmark figures (cost, speedup, gate/BP split) |
 | `test/runtests.jl` | unit tests + the end-to-end `U = 0` correctness gate |
 
 Self-contained environment with a committed `Manifest.toml`, so numbers stay comparable
@@ -86,21 +110,29 @@ logl_cum, bp_resid`.
 
 ## Sweeps
 
-```bash
-julia --project=scripts/hubbard_quench scripts/hubbard_quench/make_sweep.jl \
-      --chi 4 8 16 32 --U 0 2 4 --symmetry trivialtrivial u1u1 \
-      -- --lattice hex --size 6 6 --dt 0.01 --tfinal 1.0
-
-# then submit it yourself (make_sweep.jl never runs a Slurm command):
-sbatch -n 24 -c 1 -t 12:00:00 --wrap 'disBatch scripts/hubbard_quench/sweep.disbatch'
-
-julia --project=scripts/hubbard_quench scripts/hubbard_quench/aggregate.jl --outroot results
-```
+`make_sweep.jl` writes a disBatch task file and prints the exact `sbatch` line to use — it
+never runs a Slurm command itself. See *Running on Rusty* below for the full three-step flow.
 
 Canopy's `apply!` is **single-threaded** — there is no `Threads` anywhere in `src/`, and the
 comment in `examples/realtime/main.jl` claiming otherwise is stale. So the efficient shape is
 one process per parameter point with `BLAS.set_num_threads(1)` (the default), packed densely
 into one allocation by disBatch. Do not ask for many threads per task.
+
+**Concurrency has to shrink as χ grows, or the job gets OOM-killed.** A site tensor is
+`4·χ³` complex on a coordination-3 lattice — 34 GB of state across 32 sites at χ=256 — and on
+top of that every concurrent task holds its own Julia process, simple-update temporaries, and a
+Bumper buffer that does not shrink back. A 40-task sweep reaching χ=256 peaked at **698 GB** and
+lost its three largest tasks to the OOM killer. Split by cost instead of running one wide sweep:
+
+| χ range | suggested `-n` |
+|---|---|
+| ≤ 64 | 40+ — cheap, pack them in |
+| 96–128 | ~8 |
+| ≥ 192 | ~4, with `--mem=0` |
+
+Partial data survives a kill, because rows are flushed as they are produced — but a task killed
+before its bonds saturate contributes nothing usable, so prefer a right-sized allocation over
+relying on that.
 
 ### Running on Rusty
 
@@ -115,32 +147,48 @@ julia --project=scripts/hubbard_quench scripts/hubbard_quench/make_sweep.jl \
       --logdir  "$PWD/scripts/hubbard_quench/results/tryout/logs" \
       -- --lattice hex --size 4 4 --dt 0.02 --tfinal 1.0 --measure-every 5 --site-resolved
 
-# 2. submit — `-n` is the concurrent task count, `-t` must cover the SLOWEST SINGLE task
-sbatch -n 8 -t 30:00 -p ccq scripts/hubbard_quench/slurm/disbatch.sbatch \
+# 2. submit — make_sweep.jl prints this line for you, with paths filled in.
+#    -n = concurrent tasks; -t must cover the SLOWEST SINGLE task, not the sum.
+sbatch -n 8 -t 30:00 -p ccq -C icelake \
+       --output=scripts/hubbard_quench/results/tryout/_run/slurm-%j.log \
+       scripts/hubbard_quench/slurm/disbatch.sbatch \
        scripts/hubbard_quench/tryout.disbatch
 
-# 3. aggregate
+# 3. aggregate — writes summary.csv, per-run figures, and the timing/crossover report
 julia --project=scripts/hubbard_quench scripts/hubbard_quench/aggregate.jl \
+      --outroot scripts/hubbard_quench/results/tryout
+
+# 4. for a symmetry benchmark, also render the comparison figures
+julia --project=scripts/hubbard_quench scripts/hubbard_quench/plot_benchmark.jl \
       --outroot scripts/hubbard_quench/results/tryout
 ```
 
 Use **absolute** paths for `--outfile/--outroot/--logdir`: the task file's `#DISBATCH PREFIX`
 cds to the repo root, so relative paths happen to work, but only by coincidence.
 
-Two things the sbatch script does deliberately:
+Pin the microarchitecture with `-C icelake` (or whatever you standardise on) for any run whose
+*timings* you intend to compare — step times measured across different CPUs are not comparable,
+and pinning also keeps the precompilation cache warm between submissions.
 
-- **`bash -l`** — a login shell, so juliaup's `julia` is on `PATH` and `module` works on the
-  compute node.
+Three things the sbatch script does deliberately:
+
+- **Julia is resolved by absolute path, not from `PATH`.** juliaup may live on a workstation's
+  local NVMe (`/home/$USER/.juliaup`), which compute nodes cannot see — the bare name then fails
+  to resolve at all, even from a login shell. The real toolchains are under `~/.julia/juliaup`
+  on shared home. `make_sweep.jl` bakes `Sys.BINDIR`'s julia into the task file, and the batch
+  script resolves its own the same way, preferring 1.12.x (the site `julia` module is 1.11.x,
+  below this project's compat).
+- **`bash -l`** — needed for `module`, which is a shell function set up by the login profile.
+  It is *not* how Julia is found.
 - **A serial `Pkg.precompile()` before disBatch fans out.** Without it every task precompiles
   the same ~50 packages simultaneously, contending for the same cache files under
   `~/.julia/compiled` on GPFS and wasting minutes of allocation each. It also absorbs the case
   where the compute nodes' CPU differs from whatever last precompiled, which silently
-  invalidates the cache. Consider `-C <arch>` to keep the cache warm across submissions.
+  invalidates the cache.
 
-Sizing, measured on hex 4×4 (32 sites, χ=16, U(1)×U(1)) on a busy workstation: **2.8 s/step**,
-of which BP is 2.1 s. Add ~90 s of first-call JIT plus ~40 s for the first measurement, so a
-50-step task is ~5 min. Per-task JIT is the reason not to sweep very many very short runs — a
-sysimage would pay for itself there.
+Sizing: each task pays ~90 s of first-call JIT plus ~30 s for its first measurement before real
+work starts, which is why it is not worth sweeping very many very short runs — a sysimage would
+pay for itself there. Per-step costs at scale are in the benchmark table below.
 
 Results are small CSVs, so `/mnt/home` is the right place for them. Move `--outroot` to
 `/mnt/ceph/users/$USER` only if you start writing site-resolved data for large lattices over
@@ -212,55 +260,67 @@ auxiliary charge-bath vertex that appears in `vertices(state)`, `length(state)` 
 behave differently. Everything here iterates the module's own `lat.verts` / `lat.edges`; if
 you extend it, do the same. `params.toml` records `charge_bath`.
 
-### Where symmetry starts winning: χ ≈ 24–64, and BP is what holds it back
+### Where symmetry starts winning: χ ≈ 32–64, and BP is what holds it back
 
-Measured on hex 4×4 (32 sites), `U = 4`, `dt = 0.02`, icelake, one core per run. Cost is the
-median over steps whose bonds had actually reached χ (see the `nsat` caveat below).
+Time per Trotter step on hex 4×4 (32 sites), `U = 4`, `dt = 0.05`, `T = 1.6`, icelake, one core
+per run. The median is taken over steps whose bonds had actually reached χ; `—` means that run
+never accumulated enough such steps to be trustworthy (see the caveats).
 
-| χ | trivial/trivial | u1/trivial | trivial/u1 | u1/u1 |
+| χ | none | U(1) charge | U(1) spin | U(1)×U(1) |
 |---|---|---|---|---|
-| 8 | **0.14 s** | 0.42 s | 0.43 s | 1.38 s |
-| 16 | **0.43 s** | 0.78 s | 0.73 s | 2.54 s |
-| 24 | 1.03 s | **0.97 s** | 1.08 s | 4.05 s |
-| 32 | 2.27 s | **1.51 s** | 1.70 s | 4.97 s |
-| 48 | 7.67 s | 3.86 s | **3.45 s** | 7.97 s |
-| 64 | 14.4 s | **6.07 s** | 6.38 s | 11.8 s |
-| 96 | 27.2 s | **10.6 s** | 14.1 s | 17.2 s |
-| 128 | 51.1 s | **19.1 s** | 23.4 s | 19.4 s |
+| 8 | **0.34** | 1.21 | 1.21 | 3.90 |
+| 16 | **0.71** | 1.98 | 1.65 | 6.35 |
+| 24 | **1.76** | 2.48 | 2.56 | 10.49 |
+| 32 | 3.97 | **3.06** | 3.25 | 11.78 |
+| 48 | 11.85 | 6.53 | **6.55** | 17.16 |
+| 64 | 29.11 | 11.76 | **11.46** | 25.90 |
+| 96 | 92.75 | 34.32 | **31.80** | 43.66 |
+| 128 | 228.23 | 83.76 | 76.14 | **57.59** |
+| 192 | — | 247.65 | 236.11 | **100.07** |
+| 256 | — | 617.02 | — | **189.46** |
 
-Crossover against no symmetry: **particle-U(1) at χ ≈ 24, spin-U(1) at χ ≈ 32, both together
-at χ ≈ 64.** By χ=96–128 any single U(1) is ~2.5× faster. `u1/u1` starts worst (10× slower at
-χ=8, it carries the most sectors and so the most per-block overhead) but improves fastest and
-has caught `u1/trivial` by χ=128.
+Crossover against no symmetry: **either single U(1) at χ ≈ 32, both together at χ ≈ 64.** At
+χ=128 U(1)×U(1) reaches 3.96× and overtakes the single U(1)s, which then flatten out and end up
+3.3× *slower* than it by χ=256. No-symmetry runs cleanly as χ³ (measured exponents 2.86 and
+3.13); U(1)×U(1) runs χ^1.0–2.2.
 
-Splitting the cost shows what is actually going on — and where to optimise:
+**Use both U(1)s** unless you are working below χ ≈ 64, where no symmetry is simply faster.
+
+Splitting the cost shows why — and where to optimise:
 
 | χ=128 | gates | BP | BP share |
 |---|---|---|---|
-| trivial/trivial | 47.98 s | 3.11 s | 6% |
-| u1/trivial | 11.44 s | 7.64 s | 40% |
-| u1/u1 | **5.56 s** | 13.84 s | **71%** |
+| none | 161.6 s | 66.7 s | 29% |
+| U(1) charge | 35.9 s | 47.9 s | 57% |
+| U(1)×U(1) | **10.3 s** | 47.3 s | **82%** |
 
-Symmetry makes the *gates* **8.6× cheaper** at χ=128 (48.0 → 5.6 s) — and that ratio is still
-growing (1.6× at χ=32, 4.5× at 64, 5.0× at 96, 8.6× at 128). But it makes *BP* **4.5× more
-expensive** (3.1 → 13.8 s), and BP then consumes 71% of the symmetric run.
+Symmetry makes the *gates* dramatically cheaper — 15.7× at χ=128, and the ratio keeps growing —
+while BP stays flat or worsens, so BP ends up consuming 57–82% of a symmetric step. **Belief
+propagation is the bottleneck, not the simple update.** Messages are `χ × χ` per bond and the
+vertex-centric kernel contracts many small blocks; a block-sparse optimisation there is what
+would let the total speedup approach the gate ratio.
 
-So the 2.6× net speedup understates what symmetry is worth here: **belief propagation is the
-bottleneck**, not the simple update. BP messages are `χ × χ` per bond and the vertex-centric
-kernel contracts many small blocks; that is where a block-sparse optimisation would pay. Fix
-BP and the `u1/u1` advantage should approach the gate ratio.
+Three caveats, each of which changed the numbers above when found:
 
-Two caveats on the table:
-
-- The χ=128 row rests on 1–4 saturated steps (`nsat`), so treat it as provisional; χ ≤ 96 has
-  ≥4 and is solid.
-- `nsat` matters because from a product state the bond dimension is **entanglement-limited, not
-  rank-limited**: with a discard threshold it climbs gradually (at χ=128: 22, 29, 39, 44, 53,
-  63, 77, 85, 99, 107, 118, 128 over twelve steps). Timing a short run therefore measures the
-  cost at some intermediate bond dimension, not at χ — it made dense χ=64 read 9.5 s/step
-  instead of 14.4 s and flattened the cost curve enough to hide the crossovers entirely.
-  `aggregate.jl` now medians only over saturated steps and flags thin rows. **Budget enough
-  `--nsteps` that large χ saturates**, or the benchmark quietly measures the wrong thing.
+- **Bond dimension is entanglement-limited, not rank-limited.** From a product state, with a
+  discard threshold in play, it climbs gradually rather than saturating in a step or two — at
+  χ=128 with `dt = 0.02` it went 22, 29, 39, 44, 53, 63, 77, 85, 99, 107, 118, 128 over twelve
+  steps, reaching χ only at the end. Timing such a run measures the cost at some intermediate
+  bond dimension: it read dense χ=64 as 9.5 s/step instead of 29.1 s and flattened the cost
+  curve enough to hide every crossover. `aggregate.jl` now medians only over saturated steps
+  and reports the count as `nsat`; `plot_benchmark.jl` drops thin points entirely, because they
+  are biased *low* (the first steps after saturation are the cheapest). **Budget enough
+  `--nsteps`, and raise `dt`** — accuracy is irrelevant to a timing run, and a larger step
+  reaches high χ in fewer expensive steps.
+- **`bp/s` folds in the sweep count, not just the cost per sweep.** BP is warm-started, so how
+  many sweeps it needs depends on how much each step perturbs the state: the same dense χ=128
+  point measured 3.1 s of BP at `dt = 0.02` and 66.7 s at `dt = 0.05`. These are therefore
+  realistic adaptive-BP numbers, not clean per-sweep scaling. For the latter, run with
+  `--bp-tol 0 --bp-maxiter N` so the work per step is fixed (as Canopy's own
+  `benchmark/realtime_timing/run_timings.jl` does). Gate timings are unaffected.
+- **The dense χ=192 and χ=256 baselines are missing** because those tasks were OOM-killed, so
+  the ~10× that extrapolating χ³ implies at χ=256 is an extrapolation, not a measurement. See
+  the memory note under *Sweeps*.
 
 ### Symmetry buys walltime, not accuracy at fixed χ
 
