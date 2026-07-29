@@ -1,0 +1,24 @@
+# Run outputs — result folders, aggregated tables, figures, generated sweep files.
+results/
+figs/
+*.disbatch
+summary.csv
+
+# Backstop for run artifacts. disbatch.sbatch now collects these under
+# <outroot>/_run/<jobid>/ (already covered by results/), but a job launched by hand, or one
+# whose task file lacks the `#HQ OUTROOT` header, can still drop them here — and 25 of them
+# were committed by accident before this rule existed.
+*_status.txt
+*_driver.log
+*_context_wrap.out
+*_dbUtil.sh
+*_kvsinfo.txt
+*.context.log
+*_engine_*.log
+*_context_launch.log
+hubbard-quench-*.log
+
+# The root .gitignore excludes Manifest*.toml (correct for a package). This directory is an
+# application, not a package: the whole point of its pinned environment is that numbers stay
+# comparable across weeks, so its Manifest *is* tracked.
+!Manifest.toml
