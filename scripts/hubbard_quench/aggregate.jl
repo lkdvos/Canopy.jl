@@ -112,7 +112,7 @@ function load_run(dir)
 
     # per-step timings live in a separate file; summarize rather than join row-by-row
     tfile = joinpath(dir, "timings.csv")
-    med_step, med_bp = missing, missing
+    med_step, med_bp, med_evolve, med_hop = missing, missing, missing, missing
     if isfile(tfile)
         tim = CSV.read(tfile, DataFrame)
         loop = tim[tim.step .>= 1, :]
@@ -121,10 +121,18 @@ function load_run(dir)
         if nrow(body) > 0
             med_step = median(body.t_step)
             med_bp = median(body.t_bp)
+            med_hop = median(body.t_hop)
+            # `t_step` includes measurement on the steps that measure, which is not part of the
+            # evolution cost. For timing comparisons use gates + BP explicitly.
+            med_evolve = median(
+                body.t_single1 .+ body.t_hop .+ body.t_single2 .+ body.t_bp
+            )
         end
     end
     setcol!(:median_step_s, med_step)
     setcol!(:median_bp_s, med_bp)
+    setcol!(:median_hop_s, med_hop)
+    setcol!(:median_evolve_s, med_evolve)
     return obs
 end
 
@@ -185,9 +193,35 @@ function walltime_series(df)
     rows = NamedTuple[]
     for g in groupby(df, [:symmetry, :U, :chi]; sort = true)
         k = first(g)
-        ms = skipmissing(g.median_step_s)
+        # evolution only — `median_step_s` would fold in measurement on measuring steps
+        ms = collect(skipmissing(g.median_evolve_s))
+        isempty(ms) && (ms = collect(skipmissing(g.median_step_s)))
         isempty(ms) && continue
         push!(rows, (; symmetry = k.symmetry, U = k.U, chi = k.chi, ms = median(ms)))
+    end
+    return rows
+end
+
+# Cost of evolution alone (gates + BP, no measurement), plus the sector structure that
+# explains it. This is the table for "where does symmetry start winning".
+function timing_table(df)
+    rows = NamedTuple[]
+    for g in groupby(df, [:U, :chi, :symmetry]; sort = true)
+        k = first(g)
+        ev = collect(skipmissing(g.median_evolve_s))
+        isempty(ev) && continue
+        rows = push!(
+            rows, (;
+                U = k.U, chi = k.chi, symmetry = k.symmetry,
+                evolve = median(ev),
+                bp = let b = collect(skipmissing(g.median_bp_s))
+                    isempty(b) ? NaN : median(b)
+                end,
+                maxdim = maximum(skipmissing(g.maxdim); init = 0),
+                nsec = maximum(skipmissing(g.nsectors_max); init = 0),
+                maxsec = maximum(skipmissing(g.maxsecdim); init = 0),
+            )
+        )
     end
     return rows
 end
@@ -329,6 +363,54 @@ function (@main)(args)
             ismissing(first(g.median_step_s)) ? "n/a" :
                 @sprintf("%.4fs", first(g.median_step_s))
         )
+    end
+
+    # --- timing / crossover report ----------------------------------------------------------
+    tt = timing_table(df)
+    if !isempty(tt)
+        base = "trivial/trivial"
+        println("\nEvolution cost per step (gates + BP, measurement excluded)")
+        println("  speedup > 1 means the symmetric run is FASTER than $base at the same χ")
+        for u in sort(unique([r.U for r in tt]))
+            println("\n  U = $u")
+            @printf(
+                "  %-5s %-18s %10s %10s %8s %7s %8s %9s\n",
+                "χ", "symmetry", "evolve/s", "bp/s", "maxdim", "sectors", "max/sec", "speedup"
+            )
+            for chi in sort(unique([r.chi for r in tt if r.U == u]))
+                here = [r for r in tt if r.U == u && r.chi == chi]
+                b = findfirst(r -> r.symmetry == base, here)
+                bt = isnothing(b) ? NaN : here[b].evolve
+                for r in sort(here, by = r -> r.symmetry)
+                    # maxdim < χ means the bonds never saturated, so this row is NOT a
+                    # measurement of the cost at this χ — flag it rather than let it mislead.
+                    flag = r.maxdim < chi ? "  <-- bonds did not reach χ" : ""
+                    @printf(
+                        "  %-5d %-18s %10.4f %10.4f %8d %7d %8d %9s%s\n",
+                        chi, r.symmetry, r.evolve, r.bp, r.maxdim, r.nsec, r.maxsec,
+                        isnan(bt) ? "n/a" : @sprintf("%.2fx", bt / r.evolve), flag
+                    )
+                end
+            end
+        end
+        # Where does each symmetry overtake the baseline?
+        println("\n  Crossover (smallest χ at which the symmetric run is faster):")
+        for sym in sort(unique([r.symmetry for r in tt if r.symmetry != base]))
+            hit = nothing
+            for chi in sort(unique([r.chi for r in tt]))
+                s = findfirst(r -> r.symmetry == sym && r.chi == chi, tt)
+                b = findfirst(r -> r.symmetry == base && r.chi == chi, tt)
+                if !isnothing(s) && !isnothing(b) && tt[s].evolve < tt[b].evolve
+                    hit = chi
+                    break
+                end
+            end
+            @printf(
+                "    %-18s %s\n", sym,
+                isnothing(hit) ? "not within the χ range measured" : "χ = $hit"
+            )
+        end
+        println()
     end
 
     if !o["no_figures"]
