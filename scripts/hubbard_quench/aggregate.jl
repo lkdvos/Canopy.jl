@@ -113,19 +113,33 @@ function load_run(dir)
     # per-step timings live in a separate file; summarize rather than join row-by-row
     tfile = joinpath(dir, "timings.csv")
     med_step, med_bp, med_evolve, med_hop = missing, missing, missing, missing
+    nsat = 0
     if isfile(tfile)
         tim = CSV.read(tfile, DataFrame)
-        loop = tim[tim.step .>= 1, :]
-        # step 1 carries Julia's JIT cost and is excluded from the medians
-        body = nrow(loop) > 1 ? loop[2:end, :] : loop
-        if nrow(body) > 0
-            med_step = median(body.t_step)
-            med_bp = median(body.t_bp)
-            med_hop = median(body.t_hop)
-            # `t_step` includes measurement on the steps that measure, which is not part of the
-            # evolution cost. For timing comparisons use gates + BP explicitly.
+        # step 1 carries Julia's JIT cost, step 0 is the initial BP; exclude both.
+        body = tim[tim.step .>= 2, :]
+
+        # Only steps whose bonds have actually reached χ measure the cost *at* χ.
+        #
+        # This is not a detail. Starting from a product state the bond dimension is
+        # entanglement-limited, not rank-limited: with a discard threshold in play it climbs
+        # gradually (measured on hex 4x4 at χ=128: 22, 29, 39, 44, 53, 63, 77, 85, 99, 107,
+        # 118, 128 over twelve steps). A median over all steps therefore reports the cost at
+        # some intermediate bond dimension, not at χ — which makes large-χ points look far
+        # cheaper than they are and can flatten the cost curve entirely.
+        chi = something(get(p, "chi", missing), 0)
+        sat = chi > 0 ? body[body.maxdim .>= chi, :] : body
+        nsat = nrow(sat)
+        use = nsat > 0 ? sat : body
+
+        if nrow(use) > 0
+            med_step = median(use.t_step)
+            med_bp = median(use.t_bp)
+            med_hop = median(use.t_hop)
+            # `t_step` includes measurement on the steps that measure, which is not part of
+            # the evolution cost. For timing use gates + BP explicitly.
             med_evolve = median(
-                body.t_single1 .+ body.t_hop .+ body.t_single2 .+ body.t_bp
+                use.t_single1 .+ use.t_hop .+ use.t_single2 .+ use.t_bp
             )
         end
     end
@@ -133,6 +147,7 @@ function load_run(dir)
     setcol!(:median_bp_s, med_bp)
     setcol!(:median_hop_s, med_hop)
     setcol!(:median_evolve_s, med_evolve)
+    setcol!(:nsaturated, nsat)
     return obs
 end
 
@@ -220,6 +235,7 @@ function timing_table(df)
                 maxdim = maximum(skipmissing(g.maxdim); init = 0),
                 nsec = maximum(skipmissing(g.nsectors_max); init = 0),
                 maxsec = maximum(skipmissing(g.maxsecdim); init = 0),
+                nsat = maximum(skipmissing(g.nsaturated); init = 0),
             )
         )
     end
@@ -374,41 +390,64 @@ function (@main)(args)
         for u in sort(unique([r.U for r in tt]))
             println("\n  U = $u")
             @printf(
-                "  %-5s %-18s %10s %10s %8s %7s %8s %9s\n",
-                "χ", "symmetry", "evolve/s", "bp/s", "maxdim", "sectors", "max/sec", "speedup"
+                "  %-5s %-18s %10s %10s %7s %7s %8s %6s %9s\n",
+                "χ", "symmetry", "evolve/s", "bp/s", "maxdim", "sectors", "max/sec",
+                "nsat", "speedup"
             )
             for chi in sort(unique([r.chi for r in tt if r.U == u]))
                 here = [r for r in tt if r.U == u && r.chi == chi]
                 b = findfirst(r -> r.symmetry == base, here)
                 bt = isnothing(b) ? NaN : here[b].evolve
                 for r in sort(here, by = r -> r.symmetry)
-                    # maxdim < χ means the bonds never saturated, so this row is NOT a
-                    # measurement of the cost at this χ — flag it rather than let it mislead.
-                    flag = r.maxdim < chi ? "  <-- bonds did not reach χ" : ""
+                    # `nsat` is the number of steps whose bonds had actually reached χ. Zero
+                    # means this row does not measure the cost at χ at all; a small count means
+                    # the median rests on very few samples. Either way, say so.
+                    flag = r.nsat == 0 ? "  <-- NEVER reached χ; not a cost at this χ" :
+                        r.nsat < 4 ? "  <-- only $(r.nsat) saturated step(s)" : ""
                     @printf(
-                        "  %-5d %-18s %10.4f %10.4f %8d %7d %8d %9s%s\n",
-                        chi, r.symmetry, r.evolve, r.bp, r.maxdim, r.nsec, r.maxsec,
+                        "  %-5d %-18s %10.4f %10.4f %7d %7d %8d %6d %9s%s\n",
+                        chi, r.symmetry, r.evolve, r.bp, r.maxdim, r.nsec, r.maxsec, r.nsat,
                         isnan(bt) ? "n/a" : @sprintf("%.2fx", bt / r.evolve), flag
                     )
                 end
             end
         end
         # Where does each symmetry overtake the baseline?
+        # Only χ values where BOTH rows have a usable number of saturated steps can support a
+        # crossover claim; anything else is comparing intermediate bond dimensions.
+        const_minsat = 4
         println("\n  Crossover (smallest χ at which the symmetric run is faster):")
-        for sym in sort(unique([r.symmetry for r in tt if r.symmetry != base]))
-            hit = nothing
-            for chi in sort(unique([r.chi for r in tt]))
-                s = findfirst(r -> r.symmetry == sym && r.chi == chi, tt)
-                b = findfirst(r -> r.symmetry == base && r.chi == chi, tt)
-                if !isnothing(s) && !isnothing(b) && tt[s].evolve < tt[b].evolve
-                    hit = chi
-                    break
-                end
-            end
-            @printf(
-                "    %-18s %s\n", sym,
-                isnothing(hit) ? "not within the χ range measured" : "χ = $hit"
+        usable = sort(
+            unique(
+                [
+                    r.chi for r in tt
+                        if r.nsat >= const_minsat &&
+                        any(q -> q.symmetry == base && q.chi == r.chi && q.nsat >= const_minsat, tt)
+                ]
             )
+        )
+        if isempty(usable)
+            println("    no χ has ≥$(const_minsat) saturated steps in both runs — inconclusive.")
+            println("    Raise --nsteps: from a product state the bond dimension climbs")
+            println("    gradually, so short runs never measure the cost at large χ.")
+        else
+            for sym in sort(unique([r.symmetry for r in tt if r.symmetry != base]))
+                hit = nothing
+                for chi in usable
+                    s = findfirst(r -> r.symmetry == sym && r.chi == chi, tt)
+                    b = findfirst(r -> r.symmetry == base && r.chi == chi, tt)
+                    if !isnothing(s) && !isnothing(b) && tt[s].evolve < tt[b].evolve
+                        hit = chi
+                        break
+                    end
+                end
+                @printf(
+                    "    %-18s %s\n", sym,
+                    isnothing(hit) ? "not faster at any usable χ ≤ $(maximum(usable))" :
+                        "χ = $hit"
+                )
+            end
+            println("    (usable χ, ≥$(const_minsat) saturated steps: $(join(usable, ", ")))")
         end
         println()
     end
