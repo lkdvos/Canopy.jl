@@ -114,6 +114,7 @@ function load_run(dir)
     tfile = joinpath(dir, "timings.csv")
     med_step, med_bp, med_evolve, med_hop = missing, missing, missing, missing
     nsat = 0
+    maxdim_reached = 0
     if isfile(tfile)
         tim = CSV.read(tfile, DataFrame)
         # step 1 carries Julia's JIT cost, step 0 is the initial BP; exclude both.
@@ -128,6 +129,7 @@ function load_run(dir)
         # some intermediate bond dimension, not at χ — which makes large-χ points look far
         # cheaper than they are and can flatten the cost curve entirely.
         chi = something(get(p, "chi", missing), 0)
+        maxdim_reached = nrow(body) > 0 ? maximum(body.maxdim) : 0
         sat = chi > 0 ? body[body.maxdim .>= chi, :] : body
         nsat = nrow(sat)
         use = nsat > 0 ? sat : body
@@ -148,6 +150,10 @@ function load_run(dir)
     setcol!(:median_hop_s, med_hop)
     setcol!(:median_evolve_s, med_evolve)
     setcol!(:nsaturated, nsat)
+    # Largest bond dimension seen in the *timing* trace. `observables.csv` only samples every
+    # `--measure-every` steps, so its maxdim can still read 1 for a run that is well underway —
+    # reporting that alongside `nsat` (which comes from timings.csv) looks contradictory.
+    setcol!(:maxdim_reached, maxdim_reached)
     return obs
 end
 
@@ -238,7 +244,7 @@ function timing_table(df)
                 bp = let b = collect(skipmissing(g.median_bp_s))
                     isempty(b) ? NaN : median(b)
                 end,
-                maxdim = maximum(skipmissing(g.maxdim); init = 0),
+                maxdim = maximum(skipmissing(g.maxdim_reached); init = 0),
                 nsec = maximum(skipmissing(g.nsectors_max); init = 0),
                 maxsec = maximum(skipmissing(g.maxsecdim); init = 0),
                 nsat = maximum(skipmissing(g.nsaturated); init = 0),

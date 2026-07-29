@@ -66,6 +66,13 @@ function parse_cli(args)
         "--figdir"
         help = "output directory for figures"
         default = ""
+        "--min-saturated"
+        help = "drop (χ, symmetry) points with fewer than this many steps at χ. Such points \
+                are not merely noisy but biased LOW: the first steps after a bond saturates \
+                are the cheapest, because warm-started BP needs fewer sweeps early on. \
+                Plotting them would understate large-χ cost."
+        arg_type = Int
+        default = 4
     end
     return parse_args(args, s)
 end
@@ -80,11 +87,14 @@ function load_points(path)
         bp = collect(skipmissing(g.median_bp_s))
         (isempty(ev) || isempty(bp)) && continue
         nsat = hasproperty(g, :nsaturated) ? maximum(skipmissing(g.nsaturated); init = 0) : MINSAT
+        reached = hasproperty(g, :maxdim_reached) ?
+            maximum(skipmissing(g.maxdim_reached); init = 0) : Int(k.chi)
         e, b = median(ev), median(bp)
         push!(
             pts, (;
                 chi = Int(k.chi), symmetry = String(k.symmetry),
-                evolve = e, bp = b, gates = max(e - b, eps()), share = 100b / e, nsat = nsat,
+                evolve = e, bp = b, gates = max(e - b, eps()), share = 100b / e,
+                nsat = nsat, reached = reached,
             )
         )
     end
@@ -129,7 +139,12 @@ function figure_cost(pts, chis, syms, figdir)
             title = "Cost per step", xscale = log2, yscale = log10,
             xticks = chi_ticks(chis),
             # explicit ticks: log10 otherwise labels the axis 10^-0.5, 10^0.5, …
-            yticks = ([0.1, 0.5, 1, 5, 10, 50], ["0.1", "0.5", "1", "5", "10", "50"]),
+            yticks = let t = [0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000]
+                hi = maximum(r.evolve for r in pts)
+                lo = minimum(r.evolve for r in pts)
+                k = filter(v -> v >= lo / 5 && v <= hi * 5, t)
+                (k, [v < 1 ? string(v) : string(Int(v)) for v in k])
+            end,
         )...
     )
     series!(ax1, pts, syms, r -> r.evolve)
@@ -140,7 +155,7 @@ function figure_cost(pts, chis, syms, figdir)
     ax2 = Axis(
         fig[1, 2]; axis_kw(
             xlabel = "bond dimension χ", ylabel = "speedup vs no symmetry (×)",
-            title = "Symmetry overtakes at χ ≈ 24–64", xscale = log2, yscale = log10,
+            title = "", xscale = log2, yscale = log10,
             xticks = chi_ticks(chis),
             yticks = ([0.1, 0.25, 0.5, 1, 2, 3], ["0.1", "0.25", "0.5", "1", "2", "3"]),
         )...
@@ -150,6 +165,16 @@ function figure_cost(pts, chis, syms, figdir)
         (; r..., evolve = get(base, r.chi, NaN) / r.evolve)
             for r in pts if r.symmetry != BASE && haskey(base, r.chi)
     ]
+    # Title from the data, so it cannot go stale when the benchmark is re-run or extended.
+    cross = filter(!isnothing, [
+        let hits = sort([r.chi for r in ratio if r.symmetry == s && r.evolve > 1])
+                isempty(hits) ? nothing : first(hits)
+            end
+            for s in unique(r.symmetry for r in ratio)
+    ])
+    ax2.title = isempty(cross) ? "No symmetry is faster in this χ range" :
+        length(unique(cross)) == 1 ? "Symmetry overtakes at χ = $(first(cross))" :
+        "Symmetry overtakes at χ ≈ $(minimum(cross))–$(maximum(cross))"
     hlines!(ax2, [1.0]; color = INK2, linestyle = :dash, linewidth = 1.5)
     # data coordinates, not `space = :relative`: mixing the two silently places the label
     # outside the visible area.
@@ -162,8 +187,9 @@ function figure_cost(pts, chis, syms, figdir)
 
     Label(
         fig[2, :],
-        "hex 4×4 (32 sites), U=4, dt=0.02, one core, icelake.  \
-         Hollow markers: fewer than $(MINSAT) steps with bonds at χ — provisional.";
+        "hex 4×4 (32 sites), U=4, one core, icelake.  Cost is the median over steps whose \
+         bonds had reached χ; points with too few such steps are omitted, so a series may \
+         stop short of the widest χ shown.";
         fontsize = 10, color = INK2, halign = :left, padding = (10, 0, 0, 0),
     )
     mkpath(figdir)
@@ -212,10 +238,13 @@ function figure_breakdown(pts, chis, syms, figdir)
     series!(ax3, pts, syms, r -> r.share)
     axislegend(ax3; position = :lt, framevisible = false, labelsize = 11, labelcolor = INK2)
 
+    # Descriptive, not a hardcoded conclusion: the balance between these two panels shifts with
+    # χ, lattice and BP settings, and a baked-in claim goes stale on the next run.
     Label(
         fig[2, :],
-        "Symmetry makes the gates dramatically cheaper but BP more expensive, so BP ends up \
-         dominating the symmetric runs — that is where the remaining speedup is.";
+        "Gate and BP panels share a y-scale, so the two are directly comparable. Note that BP \
+         cost here also reflects how many sweeps convergence needed, not only the cost per \
+         sweep — run with --bp-tol 0 to hold the sweep count fixed.";
         fontsize = 10, color = INK2, halign = :left, padding = (10, 0, 0, 0),
     )
     mkpath(figdir)
@@ -230,8 +259,24 @@ function (@main)(args)
     isfile(path) || error("no summary.csv at $path — run aggregate.jl first")
     figdir = isempty(o["figdir"]) ? joinpath(dirname(path), "figs") : o["figdir"]
 
-    pts = load_points(path)
-    isempty(pts) && error("no timing rows in $path")
+    all_pts = load_points(path)
+    isempty(all_pts) && error("no timing rows in $path")
+
+    # Keep only points that actually measure the cost at their χ, for enough steps to be
+    # unbiased. Report what was dropped instead of silently thinning the curves.
+    minsat = o["min_saturated"]
+    pts = [r for r in all_pts if r.nsat >= minsat]
+    dropped = [r for r in all_pts if r.nsat < minsat]
+    if !isempty(dropped)
+        println("dropped $(length(dropped)) incomplete point(s) (<$(minsat) steps at χ):")
+        for r in sort(dropped, by = r -> (r.chi, r.symmetry))
+            @printf(
+                "  χ=%-4d %-16s nsat=%-3d reached χ=%d\n",
+                r.chi, r.symmetry, r.nsat, r.reached
+            )
+        end
+    end
+    isempty(pts) && error("no point has ≥$(minsat) saturated steps")
     chis = sort(unique(r.chi for r in pts))
     syms = [s for s in SYM_ORDER if any(r -> r.symmetry == s, pts)]
     extra = setdiff(unique(r.symmetry for r in pts), SYM_ORDER)
