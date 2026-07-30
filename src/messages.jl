@@ -93,6 +93,11 @@ function BPMessages(state::TensorNetworkState)
     return BPMessages(messages)
 end
 
+# A `TensorNetworkOperator` reaches BP through its fused state view: message spaces involve
+# only virtual legs, which the view shares, so the messages are interchangeable between the
+# two objects. See `TensorNetworkState(::TensorNetworkOperator)`.
+BPMessages(op::TensorNetworkOperator) = BPMessages(TensorNetworkState(op))
+
 # Properties
 # ----------
 Base.eltype(::Type{BPMessages{T, S, A, V}}) where {T, S, A, V} = TensorMap{T, S, 1, 1, A}
@@ -130,6 +135,9 @@ Return `true` if `messages` is structurally compatible with `state`:
 Does not check that the messages are a BP fixed point; only that their
 spaces line up with `state`.
 """
+check_consistency(op::TensorNetworkOperator, msgs::BPMessages) =
+    check_consistency(TensorNetworkState(op), msgs)
+
 function check_consistency(state::TensorNetworkState, msgs::BPMessages)
     es = edges(state)
     2 * length(es) == length(msgs.messages) || return false

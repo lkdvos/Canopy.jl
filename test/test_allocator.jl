@@ -1,6 +1,6 @@
 using Canopy
 using Canopy: BPMessages, belief_propagation, compute_message,
-              LocalGate, apply!, physicalspace
+              LocalGate, LeftGate, RightGate, SandwichGate, apply!, physicalspace
 using TensorKit
 using TensorKit.TO: DefaultAllocator, DefaultBackend
 using TensorKitTensors.FermionOperators: fermion_space
@@ -73,4 +73,37 @@ end
     end
     @test info_def.ϵ ≈ info_bmp.ϵ
     @test info_def.logλ ≈ info_bmp.logλ
+end
+
+# The operator path adds a second physical leg to every tensor, so `_absorb_legs`' bump
+# allocation and the `θ` contraction see different shapes; `SandwichGate` in particular puts
+# two physical legs in the `R` factor. Pin the same equivalence there. Bosonic only — gate
+# application on an operator refuses fermionic sectors for now.
+_operator_on(g, P, V; seed) = (
+    Random.seed!(seed); o = randn_operator(ComplexF64, g, P, V); (o, BPMessages(o))
+)
+
+@testset "apply! 2-site operator: Bumper ≡ default ($(nameof(W)))" for
+        W in (LeftGate, RightGate, SandwichGate)
+    P, V = ComplexSpace(2), ComplexSpace(4)
+    g = grid([2, 3])
+    e = first(edges(g))
+    u, v = src(e), dst(e)
+    gate = W(LocalGate((u, v), _unitary_gate(P; seed = 7)))
+
+    o_def, m_def = _operator_on(g, P, V; seed = 3)
+    o_bmp, m_bmp = _operator_on(g, P, V; seed = 3)
+    _, _, info_def = apply!(o_def, m_def, gate; trunc = notrunc(), allocator = DefaultAllocator())
+    _, _, info_bmp = apply!(o_bmp, m_bmp, gate; trunc = notrunc())  # Bumper default
+
+    for w in (u, v)
+        @test space(o_def[w]) == space(o_bmp[w])
+        @test o_def[w] ≈ o_bmp[w]
+    end
+    for de in keys(m_def.messages)
+        @test m_def[de] ≈ m_bmp[de]
+    end
+    @test info_def.ϵ ≈ info_bmp.ϵ
+    @test info_def.logλ ≈ info_bmp.logλ
+    @test Canopy.buffer_isempty(Bumper.default_buffer(Bumper.ResizeBuffer))
 end

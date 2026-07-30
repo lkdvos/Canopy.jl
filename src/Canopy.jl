@@ -41,9 +41,11 @@ include("states/abstract_tensornetwork.jl")
 include("states/tensornetworkstate.jl")
 include("states/lattices.jl")
 include("states/productstate.jl")
-export AbstractTensorNetwork
+include("states/tensornetworkoperator.jl")
+export AbstractTensorNetwork, TensorNetworkOperator
 export square_lattice, triangular_lattice, hexagonal_lattice
 export product_state, randn_state, rand_state
+export identity_operator, randn_operator, rand_operator
 export vertices
 
 include("utility.jl")
@@ -65,6 +67,10 @@ export LocalGate, apply!
 
 include("operators/composite_gate.jl")
 export CompositeGate, Circuit
+
+# `simple_update.jl` dispatches on `SidedGate`, so the gate types come first
+include("operators/sided_gate.jl")
+export LeftGate, RightGate, SandwichGate
 
 include("simple_update.jl")
 

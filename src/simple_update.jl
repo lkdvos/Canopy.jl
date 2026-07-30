@@ -1,21 +1,48 @@
 # --- two-site BP-gauge simple update -----------------------------------------
 #
-# The kernel is written against `_acted_slots(gate)` — which physical slots enter the `R`
-# factor rather than staying in the environment — and a `_gate_theta` contraction, so that
-# networks with more than one physical leg per site can reuse it unchanged.
+# One kernel serves a state and all three sided operator gates. The only things that vary
+# are `_acted_slots(gate)` — which physical slots enter the `R` factor rather than staying in
+# the environment — and the `θ` contraction, `_gate_theta` below.
+#
+# Because a leg the gate does not touch stays in `Q`, a one-sided gate on an operator costs
+# exactly what the same gate costs on a state. Only `SandwichGate` pays the `d²` price.
 
 apply!(state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 2}; kwargs...) =
     _apply_2site!(state, msgs, gate; kwargs...)
 
-_gate_tensor(gate::LocalGate) = gate.tensor
+function apply!(
+        op::TensorNetworkOperator, msgs::BPMessages,
+        gate::SidedGate{<:Any, <:Any, <:Any, <:LocalGate{<:Any, 2}}; kwargs...,
+    )
+    _check_bosonic(op)
+    return _apply_2site!(op, msgs, gate; kwargs...)
+end
 
-# `θ` glues the two `R` factors across the old bond and applies the gate. `θ`'s codomain holds
-# site 1's legs and its domain site 2's, so `svd_trunc!` cuts exactly across the bond.
-function _gate_theta(::LocalGate, R₁, R₂, G, Gd, backend, allocator)
+# the raw gate tensor behind a bare or wrapped gate
+_gate_tensor(gate::LocalGate) = gate.tensor
+_gate_tensor(gate::SidedGate) = _gate_tensor(gate.gate)
+
+# `θ` glues the two `R` factors across the old bond and applies the gate. In every variant
+# `θ`'s codomain holds site 1's legs and its domain site 2's, so `svd_trunc!` cuts exactly
+# across the bond. A contracted index sits on the gate's *domain* for a left action and on
+# its *codomain* for a right action — that asymmetry is the whole content of `ρG` pairing ρ's
+# column index with `G`'s row index, and the dual slot-2 leg supplies the transpose for free.
+function _gate_theta(::Union{LocalGate, LeftGate}, R₁, R₂, G, Gd, backend, allocator)
     @tensor backend = backend allocator = allocator θ[-1 -2; -3 -4] :=
         R₁[-1; 1 2] * R₂[-3; 3 2] * G[-2 -4; 1 3]
     return θ
 end
+function _gate_theta(::RightGate, R₁, R₂, G, Gd, backend, allocator)
+    @tensor backend = backend allocator = allocator θ[-1 -2; -3 -4] :=
+        R₁[-1; 1 2] * R₂[-3; 3 2] * G[1 3; -2 -4]
+    return θ
+end
+function _gate_theta(::SandwichGate, R₁, R₂, G, Gd, backend, allocator)
+    @tensor backend = backend allocator = allocator θ[-1 -2 -3; -4 -5 -6] :=
+        R₁[-1; 1 2 5] * R₂[-4; 3 4 5] * G[-2 -5; 1 3] * Gd[2 4; -3 -6]
+    return θ
+end
+
 function _apply_2site!(
         state::AbstractTensorNetwork, msgs::BPMessages, gate;
         trunc = notrunc(), gauge_tol::Real = default_gauge_tol(state), normp::Real = 2,
@@ -42,7 +69,7 @@ function _apply_2site!(
             G = permute(G, ((2, 1), (4, 3)))
             s₁, s₂ = s₂, s₁
         end
-        Gd = nothing
+        Gd = gate isa SandwichGate ? G' : nothing
 
         k₁ = leg_index(state, DirectedEdge(s₁, s₂))
         k₂ = leg_index(state, DirectedEdge(s₂, s₁))
