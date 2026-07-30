@@ -72,7 +72,8 @@ end
 # and it is the first thing to check when a "regression" appears in a group that
 # the change cannot have touched.
 _bench_loadavg() = try
-    strip(first(split(read("/proc/loadavg", String), '/')))
+    # /proc/loadavg is "1min 5min 15min running/total lastpid"; keep the three averages.
+    join(split(read("/proc/loadavg", String))[1:3], " ")
 catch
     "unknown"
 end
