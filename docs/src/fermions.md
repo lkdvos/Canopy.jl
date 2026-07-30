@@ -13,6 +13,17 @@ it is fermion-specific *code paths*: the same generic routines run for bosonic
 and fermionic spaces, and the fermionic signs fall out of the conventions below
 plus TensorKit's automatic braiding.
 
+!!! warning "Scope: states only"
+    Everything below concerns [`TensorNetworkState`](@ref). Gate application on a
+    [`TensorNetworkOperator`](@ref) **throws** for fermionic sectortypes, because the
+    operator path introduces braid sites this analysis does not cover: its second
+    codomain leg crosses the QR/SVD partition, and it is contracted against a gate on
+    the bra side. The open question is whether right-multiplication on a dual codomain
+    leg needs a compensating `twist!` — see [Operators and density matrices](@ref). The
+    operator type, its constructors and its fused state view *are* fermion-safe, and
+    `test/test_operators.jl` exercises them on `fℤ₂`. The table at the end of this page
+    covers the state path only.
+
 ## 1. A global vertex order fixes the fermion order
 
 Everything rests on one idea: a single global ordering of the vertex keys
@@ -233,6 +244,9 @@ The bosonic round-trip tests additionally hit the `k₁ = 1` and `k₁ = N` leg-
 permutation boundary cases.
 
 ## Quick reference: every fermion-sign site
+
+Every entry below is on the [`TensorNetworkState`](@ref) path; the operator path is not yet
+covered (see the warning at the top of this page).
 
 | Concern | Location | Mechanism |
 |---|---|---|

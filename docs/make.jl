@@ -29,6 +29,7 @@ makedocs(;
         "Home" => "index.md",
         "Design" => "design.md",
         "Constructing states" => "states.md",
+        "Operators and density matrices" => "operators.md",
         "Fermions" => "fermions.md",
         "Examples" => ["examples/index.md"; example_pages],
     ],
