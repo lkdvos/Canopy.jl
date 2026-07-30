@@ -29,9 +29,11 @@
 # this group into a `maxiter × sweep` cap artefact, which is both uninformative
 # and the most expensive thing the suite can do.
 #
-# χ = 32 is gated: with four schedules × two symmetries it is the single most
-# expensive block of the suite, and at that χ only `:tree` and `:splash` converge
-# even on the open cell (`benchmark/reports/schedules.md` records which).
+# χ = 32 is gated on cost, not on convergence: with four schedules × two symmetries
+# it is the single most expensive block of the suite. All four schedules do reach
+# `SCHED_TOL` on the open cell at both χ (`benchmark/reports/schedules.csv`), but
+# `:sync` / `:residual` need ~430 iterations to do it at χ = 32 — 11.6 s / 6.9 s
+# per solve — which is what the gate is avoiding.
 const SCHED_HEX_CHIS = BENCH_FULL ? (8, 32) : (8,)
 
 _sched_topologies() = (

@@ -10,6 +10,13 @@
 # multiplied" from "blocks grew"; `report_structure.jl` is the census that
 # explains the ratios.
 #
+# The pair to read for a *selection threshold* on mean subblock size is
+# `:fz2_u1` vs `:fz2_u1_flat` at equal χ. Same symmetry group, same total χ, but
+# `:fz2_u1` moves block count and block size together (nsectors 7→13, meanblk
+# 1.6→234.7 over the χ grid) while `:fz2_u1_flat` holds the count at 4 (ntrees 16)
+# and moves only the size (meanblk 7.5→3840). A τ fitted on `:fz2_u1` alone is
+# fitted on a mixed axis.
+#
 # Every entry here uses `cold_messages`: `compute_message!` never branches on
 # tensor values, so warming is pure setup cost. See `setup.jl`.
 

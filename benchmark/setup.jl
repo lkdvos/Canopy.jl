@@ -66,7 +66,7 @@ const BENCH_ALLOCATORS = (
 # deliberately *not* a benchmark dependency, since the physical space content is
 # irrelevant to `randn_state` cost.
 #
-# The four entries separate the two axes along which symmetric blocks get harder:
+# The entries separate the two axes along which symmetric blocks get harder:
 #
 #   * blocks *growing*     — `:z2` / `:fz2` keep 2 sectors at every χ, so the
 #     per-sector degeneracy grows linearly and BLAS eventually dominates.
@@ -74,9 +74,13 @@ const BENCH_ALLOCATORS = (
 #     blocks stay small and per-block bookkeeping (`twist!`, subblock lookups,
 #     LRU hits) dominates. This is the regime the project targets.
 #
-# `report_structure.jl` additionally censuses `:fz2_u1_flat` (below), which holds
-# the sector count *fixed* at 4, so the two axes can be compared within one
-# symmetry group rather than only across symmetry groups.
+# `:fz2_u1` alone cannot separate them: from χ = 8 to 64 it moves sector count
+# (7→13) and mean subblock size (1.6→234.7) *together*, so a threshold fitted
+# against it is fitted against a mixed axis. `:fz2_u1_flat` is the control — the
+# same symmetry group and the same total χ with the sector count pinned at 4, so
+# on the honeycomb vertex `ntrees` stays 16 over the whole χ grid while `meanblk`
+# grows 7.5→3840. It is in `BENCH_SPACES`, not census-only, precisely so that the
+# separation exists in the *timing* data and not only in the census.
 
 """
     _peaked_dims(χ, nsec) -> Vector{Int}
@@ -123,11 +127,13 @@ function _fz2u1_virtual(χ::Int)
     return _fz2u1_space(ns, _peaked_dims(χ, length(ns)))
 end
 
-# Census-only companion to `:fz2_u1`: the *same* symmetry group with the sector
-# count pinned at 4, so growing χ grows the degeneracies instead of multiplying
-# the sectors. This is the degeneracy-heavy regime the kernel profile in the
-# project plan was taken on. Keeping it out of `BENCH_SPACES` keeps `SUITE`
-# inside its time budget.
+# Companion to `:fz2_u1`: the *same* symmetry group with the sector count pinned
+# at 4, so growing χ grows the degeneracies instead of multiplying the sectors.
+# This is the degeneracy-heavy regime the kernel profile in the project plan was
+# taken on. `:z2` / `:fz2` also hold their block count fixed, but in a different
+# symmetry group; this one does it *inside* `fℤ₂ ⊠ U1Irrep`, so it is the only
+# fixture directly comparable to `:fz2_u1` — see the axis note above
+# `BENCH_SPACES`.
 const _FZ2U1_FLAT_NS = -2:1
 _fz2u1_flat_virtual(χ::Int) =
     _fz2u1_space(_FZ2U1_FLAT_NS, _peaked_dims(χ, length(_FZ2U1_FLAT_NS)))
@@ -143,10 +149,15 @@ const BENCH_SPACES = (
     (:z2, Vect[Z2Irrep](0 => 1, 1 => 1), _z2_virtual),
     (:fz2, Vect[fℤ₂](0 => 1, 1 => 1), _fz2_virtual),
     (:fz2_u1, _P_FZ2U1, _fz2u1_virtual),
+    (:fz2_u1_flat, _P_FZ2U1, _fz2u1_flat_virtual),
 )
 
-# `BENCH_SPACES` plus the fixed-sector-count `:fz2_u1` variant; see above.
-const CENSUS_SPACES = (BENCH_SPACES..., (:fz2_u1_flat, _P_FZ2U1, _fz2u1_flat_virtual))
+# The spaces `report_structure.jl` censuses. Every timed space is censused, so
+# this is currently just an alias — kept as a distinct name because the census is
+# free (pure structure, no timings) and may legitimately cover spaces the suite
+# cannot afford to time. Anything added here that is *not* in `BENCH_SPACES` gets
+# no timings, so `bench_space` resolves against this tuple, not `BENCH_SPACES`.
+const CENSUS_SPACES = BENCH_SPACES
 
 # The full χ grid every splitter is validated against.
 const BENCH_CHIS = (8, 16, 32, 64)
@@ -162,9 +173,15 @@ function bench_space(sym::Symbol)
     return CENSUS_SPACES[i][2], CENSUS_SPACES[i][3]
 end
 
-# Splitter self-check. A splitter that misses the requested total, or that
-# silently yields the same number of sectors at every χ, measures the wrong axis;
-# assert both here rather than discovering it in a report.
+# Splitter self-check. A splitter that misses the requested total measures at a
+# different χ than it claims, and a splitter whose *sector count* drifts off the
+# axis it is supposed to hold measures the wrong axis entirely; assert both here
+# rather than discovering it in a report.
+#
+# The two graded-U(1) entries are asserted in *opposite* directions, and that is
+# the point of having both: `:fz2_u1` must multiply its sectors as χ grows, while
+# `:fz2_u1_flat` must keep them fixed so χ only grows the degeneracies. Applying
+# the growth check to `:fz2_u1_flat` would contradict its entire purpose.
 let
     for (sym, _, V) in CENSUS_SPACES
         for χ in BENCH_CHIS
@@ -175,6 +192,9 @@ let
         if sym === :fz2_u1
             (issorted(nsec) && last(nsec) > first(nsec)) ||
                 error("BENCH_SPACES[:fz2_u1]: sector count does not grow with χ ($nsec)")
+        elseif sym === :fz2_u1_flat
+            allequal(nsec) ||
+                error("BENCH_SPACES[:fz2_u1_flat]: sector count is not fixed in χ ($nsec)")
         end
     end
 end
@@ -208,19 +228,50 @@ hex_state(
 # Honeycomb fixture for the groups that run BP *to a tolerance*.
 #
 # MEASURED, NOT ASSUMED: on the fully periodic 2×2 cell, a `fℤ₂ ⊠ U1Irrep` random
-# state does not converge to `SCHED_TOL = 1e-8` under *any* schedule. Its residual
-# decays algebraically, roughly like `1/k` — 1.2e-1 at k=10, 9.7e-3 at k=50,
-# 3.2e-3 at k=100, 4.4e-4 at k=300 — so 1e-8 is thousands of iterations away, and
-# every `SUITE["schedule"]` entry on that fixture would measure `maxiter × sweep`
-# (i.e. duplicate the `convergence` group) at the maximum possible cost. The same
-# geometry with trivial symmetry reaches 4e-16 in ~18 iterations, so this is a
-# property of the graded state on a small torus, not of the geometry alone.
+# state does not converge to `SCHED_TOL = 1e-8` under *any* schedule. The quantity
+# below is the *true fixed-point* residual — recompute every message from the
+# current set and compare (`tr_distance(…; is_hermitian = true)`), not the per-step
+# change `bp_state.residuals` reports — and it decays algebraically, not
+# geometrically:
 #
-# Dropping the periodicity fixes it: on the *open* 2×2 cell all four schedules
-# converge at χ = 8 (17–133 iterations) and `:tree` / `:splash` still converge at
-# χ = 32 (242 / 84). It stays loopy (8 vertices, 8 edges → one independent cycle)
-# and it adds `oneunit`-padded legs at the boundary (degrees 1, 2, 3 with `N = 3`),
-# which is extra coverage rather than less.
+#        k =        10       50       100      300      1000
+#   χ=8,  :sync   9.9e-2   1.2e-2   3.0e-3   3.5e-4   3.1e-5
+#   χ=32, :sync   1.1e-1   1.3e-2   3.6e-3   4.5e-4   4.5e-5
+#
+# `:tree` behaves the same (1.3e-5 at χ=8, 3.2e-5 at χ=32, both at k=1000). So
+# after 1000 iterations it is still >3 orders of magnitude above 1e-8, at both χ
+# and under both schedules; the fitted decay is ≈ k^-1.75, which puts 1e-8 near
+# 1e5 iterations. Every `SUITE["schedule"]` entry on that fixture would therefore
+# measure `maxiter × sweep` — duplicating the `convergence` group — at the maximum
+# possible cost.
+#
+# MEASURED, and narrower than it looks: this is a property of *this charge
+# distribution*, not of gradedness, not of the sector count, and not of the torus.
+# `:fz2_u1_flat` (same symmetry group, sector count pinned at 4) also fails on the
+# periodic cell, so it is not the growing sector count. But the same geometry, same
+# symmetry group and same total χ = 8 with charges all *non-negative* —
+# `(0,0)=>1, (1,1)=>2, (0,2)=>2, (1,3)=>2, (0,4)=>1` — reaches 2.4e-16 within 10
+# iterations (`iterations_to_tol` 9 `:sync` / 6 `:tree`), and `:trivial` on the same
+# cell needs 18. The discriminant across those three graded distributions is whether
+# the charges straddle zero — `_fz2u1_virtual` spans `-nmax:nmax` and
+# `_fz2u1_flat_virtual` spans `-2:1`, and both fail — but that is three data points,
+# so treat it as the working hypothesis rather than a theorem. What is *not* in
+# doubt is the negative result: do **not** read this as "graded + periodic is
+# unusable" when choosing future fixtures. That is false, and acting on it would
+# cost real coverage.
+#
+# Dropping the periodicity fixes it. On the *open* 2×2 cell **all four** schedules
+# converge at **both** χ (source: `benchmark/reports/schedules.csv`, `hex_open` /
+# `fz2_u1` — read it from there rather than restating it, so it cannot drift again):
+#
+#   χ = 8    sync 436   tree 139   residual 454   splash 135
+#   χ = 32   sync 429   tree 126   residual 431   splash 138
+#
+# It stays loopy (8 vertices, 8 edges → one independent cycle), and its degree
+# sequence is `[1, 1, 2, 2, 2, 2, 3, 3]` against `N = 3`, so it is the only
+# honeycomb fixture that exercises `oneunit`-padded domain legs at all — the
+# periodic cell is degree 3 everywhere, i.e. `d == N` at every vertex and never a
+# padded leg. Extra coverage, not less.
 #
 # The `message` and `sweep` groups keep the fully periodic cell: neither runs to a
 # tolerance, and there every vertex has degree exactly 3.

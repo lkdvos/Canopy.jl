@@ -82,6 +82,41 @@ default `SUITE` (no `CANOPY_BENCH_FULL`), 93 keys.
 Note the `_e79a384_` in both names is `main`'s sha, and that is the point: phase 0
 adds no `src/` diff, so both runs execute exactly the code `main` executes.
 
+### ⚠ Both files predate the `:fz2_u1_flat` addition — expect missing keys, not regressions
+
+`noise1` / `noise2` were recorded when `BENCH_SPACES` held four symmetries. The
+phase-0 addendum promoted `:fz2_u1_flat` from census-only into `BENCH_SPACES`, so
+the current default `SUITE` has **96** keys where these files have 93. The three
+extra keys are
+
+    SUITE["message"]["hex_vertex", :fz2_u1_flat, χ]   for χ ∈ {8, 16, 32}
+    (plus χ = 64 under CANOPY_BENCH_FULL=1)
+
+and they are the only difference — no existing key changed, since `bench_sweep.jl`,
+`bench_schedule.jl` and `bench_allocator.jl` name their symmetries explicitly
+rather than iterating `BENCH_SPACES`.
+
+Consequence for a future `judge` against these files: **BenchmarkTools reports keys
+present on only one side as missing from the comparison, not as regressions.** The
+new keys will simply be absent from the `judge` output. That is expected and is not
+evidence of anything. The recorded noise floors in
+`benchmark/reports/noise_floor.md` remain valid for the 93 shared keys — the
+`message` group's floor in particular was measured over the other symmetries at the
+same fixture and geometry, so applying it to the new keys is reasonable but is an
+extrapolation, not a measurement.
+
+Re-taking the pair (≈45 min for two full runs) was deliberately deferred: it buys
+one group's floor for three new keys and nothing else. Do re-take it before any
+phase gates on `:fz2_u1_flat` timings quantitatively.
+
+`benchmark/params.json` covers the new keys. Only the three new entries were
+tuned and appended; the 93 pre-existing entries were left **byte-identical**, so
+`loadparams!` still reproduces exactly the `evals`/`samples`/`seconds` that
+`noise1`/`noise2` were recorded with. A blanket `tune!(SUITE)` would *not* have
+that property — it would re-derive `evals` for every key and quietly break the
+one condition point 2 above insists on. If you ever do need a full re-tune,
+re-take the baselines in the same session.
+
 ### The noise floor
 
 `noise1` and `noise2` were produced by running the harness twice over *identical*
