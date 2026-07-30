@@ -37,9 +37,11 @@ include("bumper.jl")
 include("edges.jl")
 
 include("states/charges.jl")
+include("states/abstract_tensornetwork.jl")
 include("states/tensornetworkstate.jl")
 include("states/lattices.jl")
 include("states/productstate.jl")
+export AbstractTensorNetwork
 export square_lattice, triangular_lattice, hexagonal_lattice
 export product_state, randn_state, rand_state
 export vertices
@@ -61,10 +63,10 @@ export AbstractGate
 include("operators/local_gate.jl")
 export LocalGate, apply!
 
-include("simple_update.jl")
-
 include("operators/composite_gate.jl")
 export CompositeGate, Circuit
+
+include("simple_update.jl")
 
 include("operators/trotterize.jl")
 export TrotterScheme, Strang, trotterize, edge_coloring

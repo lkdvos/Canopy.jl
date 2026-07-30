@@ -1,15 +1,33 @@
 # --- two-site BP-gauge simple update -----------------------------------------
-function apply!(
-        state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 2};
+#
+# The kernel is written against `_acted_slots(gate)` — which physical slots enter the `R`
+# factor rather than staying in the environment — and a `_gate_theta` contraction, so that
+# networks with more than one physical leg per site can reuse it unchanged.
+
+apply!(state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 2}; kwargs...) =
+    _apply_2site!(state, msgs, gate; kwargs...)
+
+_gate_tensor(gate::LocalGate) = gate.tensor
+
+# `θ` glues the two `R` factors across the old bond and applies the gate. `θ`'s codomain holds
+# site 1's legs and its domain site 2's, so `svd_trunc!` cuts exactly across the bond.
+function _gate_theta(::LocalGate, R₁, R₂, G, Gd, backend, allocator)
+    @tensor backend = backend allocator = allocator θ[-1 -2; -3 -4] :=
+        R₁[-1; 1 2] * R₂[-3; 3 2] * G[-2 -4; 1 3]
+    return θ
+end
+function _apply_2site!(
+        state::AbstractTensorNetwork, msgs::BPMessages, gate;
         trunc = notrunc(), gauge_tol::Real = default_gauge_tol(state), normp::Real = 2,
         timer = nothing, backend = DefaultBackend(), allocator = default_allocator(state),
     )
     return @maybe_timeit timer "apply! 2-site" begin
         _check_compatible(state, gate)
-        s₁, s₂ = gate.sites
-        G = gate.tensor
+        gatesites = sites(gate)
+        s₁, s₂ = gatesites
+        G = _gate_tensor(gate)
 
-        @debug "apply! 2-site entry" sites = gate.sites isempty = buffer_isempty(allocator) stats = buffer_stats(allocator)
+        @debug "apply! 2-site entry" gatesites isempty = buffer_isempty(allocator) stats = buffer_stats(allocator)
 
         # The buffer-allocating steps below are each self-contained: `_absorb_legs`
         # (gauge in / reconstruct) frees its temporaries and resets the buffer, and
@@ -18,15 +36,26 @@ function apply!(
         # MatrixAlgebraKit factorizations (`qr_compact!`, `svd_trunc!`, `eigh_full`)
         # do not use this allocator and always allocate on the heap.
 
-        # Canonical orientation: smaller vertex on the codomain side of the SVD.
+        # Canonical orientation: smaller vertex on the codomain side of the SVD. Canonicalize
+        # `G` *before* deriving the bra-side factor, so it inherits the swap.
         if s₁ > s₂
             G = permute(G, ((2, 1), (4, 3)))
             s₁, s₂ = s₂, s₁
         end
+        Gd = nothing
 
         k₁ = leg_index(state, DirectedEdge(s₁, s₂))
         k₂ = leg_index(state, DirectedEdge(s₂, s₁))
         Nd = numin(state[s₁])
+        np = numout(state[s₁])
+        M = np + Nd
+        # Legs entering `R`: the acted physical slots plus the shared bond. Everything else —
+        # including any physical slot the gate does not touch — goes to `Q`.
+        acted = _acted_slots(gate)
+        rlegs₁ = (acted..., np + k₁)
+        rlegs₂ = (acted..., np + k₂)
+        qlegs₁ = TupleTools.deleteat(ntuple(identity, M), rlegs₁)
+        qlegs₂ = TupleTools.deleteat(ntuple(identity, M), rlegs₂)
 
         # Absorb square root factors and factorize
         T₁, T₂, gauge₁, gauge₂ = @maybe_timeit timer "gauge in" begin
@@ -37,16 +66,15 @@ function apply!(
             (t₁, t₂, g₁, g₂)
         end
 
-        legs = ntuple(identity, Nd + 1)
         Q₁, R₁, Q₂, R₂ = @maybe_timeit timer "QR" begin
-            q₁, r₁ = qr_compact!(permute(T₁, (TupleTools.deleteat(legs, (1, k₁ + 1)), (1, k₁ + 1))))
-            q₂, r₂ = qr_compact!(permute(T₂, (TupleTools.deleteat(legs, (1, k₂ + 1)), (1, k₂ + 1))))
+            q₁, r₁ = qr_compact!(permute(T₁, (qlegs₁, rlegs₁)))
+            q₂, r₂ = qr_compact!(permute(T₂, (qlegs₂, rlegs₂)))
             (q₁, r₁, q₂, r₂)
         end
 
         # Apply gate and factorize
         U, Σ, Vᴴ, logλ, ϵ = @maybe_timeit timer "gate+SVD" begin
-            @tensor backend = backend allocator = allocator θ[-1 -2; -3 -4] := R₁[-1; 1 2] * R₂[-3; 3 2] * G[-2 -4; 1 3]
+            θ = _gate_theta(gate, R₁, R₂, G, Gd, backend, allocator)
             U, Σ, Vᴴ, ϵ = svd_trunc!(θ; trunc)
             if iszero(normp)
                 logλ = zero(scalartype(Σ))
@@ -62,16 +90,24 @@ function apply!(
         end
 
         @maybe_timeit timer "reconstruct" begin
-            # Store result in state
-            outer = ntuple(identity, Nd - 1)
+            # `Q * X` re-attaches the environment, leaving legs in the order
+            # `(qlegs..., acted..., new bond)` for site 1 and `(qlegs..., new bond, acted...)`
+            # for site 2. Inverting that permutation puts every leg back in its original slot,
+            # with the new bond taking the shared bond's place.
+            na = length(acted)
+            X₁ = permute(U, ((1,), ntuple(i -> i + 1, na + 1)))
+            p₁ = TupleTools.invperm((qlegs₁..., acted..., np + k₁))
             T₁ = permute(
-                Q₁ * permute(U, ((1,), (2, 3))),
-                ((Nd,), TupleTools.insertafter(outer, k₁ - 1, (Nd + 1,))),
+                Q₁ * X₁,
+                (ntuple(i -> p₁[i], np), ntuple(j -> p₁[np + j], Nd)),
             )
             state.vertices[s₁] = _absorb_legs(T₁, (k => Linv for (k, _, Linv) in gauge₁), backend, allocator)
+
+            X₂ = permute(Vᴴ, ((2,), (1, ntuple(i -> i + 2, na)...)))
+            p₂ = TupleTools.invperm((qlegs₂..., np + k₂, acted...))
             T₂ = permute(
-                Q₂ * permute(Vᴴ, ((2,), (1, 3))),
-                ((Nd + 1,), TupleTools.insertafter(outer, k₂ - 1, (Nd,))),
+                Q₂ * X₂,
+                (ntuple(i -> p₂[i], np), ntuple(j -> p₂[np + j], Nd)),
             )
             state.vertices[s₂] = _absorb_legs(T₂, (k => Linv for (k, _, Linv) in gauge₂), backend, allocator)
         end
@@ -82,7 +118,7 @@ function apply!(
         V′ᵈ = virtualspace(state, DirectedEdge(s₂, s₁))
         msgs.messages[DirectedEdge(s₁, s₂)] = DiagonalTensorMap(Σ.data, V′ᵈ)
 
-        @debug "apply! 2-site exit" sites = gate.sites isempty = buffer_isempty(allocator) stats = buffer_stats(allocator)
+        @debug "apply! 2-site exit" gatesites isempty = buffer_isempty(allocator) stats = buffer_stats(allocator)
         (state, msgs, (; ϵ, logλ))
     end
 end
@@ -119,7 +155,7 @@ end
 
 # `(leg_index, L, Linv)` for each non-partner neighbour of `first(edge)`.
 function _gauge_factors(
-        state::TensorNetworkState, msgs::BPMessages, edge::DirectedEdge; tol::Real,
+        state::AbstractTensorNetwork, msgs::BPMessages, edge::DirectedEdge; tol::Real,
     )
     M = eltype(msgs)
     factors = Vector{Tuple{Int, M, M}}()

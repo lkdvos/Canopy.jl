@@ -14,8 +14,12 @@ Type parameters:
 - `N`: maximum coordination number (fixed size of every tensor's domain).
 - `A <: DenseVector{T}`: dense storage type for tensor blocks.
 - `V`: vertex token type, the key type of `adjacency` and `vertices`.
+
+See [`AbstractTensorNetwork`](@ref) for the shared interface, and
+[`TensorNetworkOperator`](@ref) for the two-physical-leg counterpart.
 """
-struct TensorNetworkState{T <: Number, S <: IndexSpace, N, A <: DenseVector{T}, V}
+struct TensorNetworkState{T <: Number, S <: IndexSpace, N, A <: DenseVector{T}, V} <:
+    AbstractTensorNetwork{T, S, N, A, V}
     # TODO: small vector?
     adjacency::Dictionary{V, Vector{V}}
     vertices::Dictionary{V, StateTensor{T, S, N, A}}
@@ -67,16 +71,8 @@ function TensorNetworkState{T, S, N, A, V}(
     @assert !any(isdual, vspaces) "TensorNetworkState expects non-dual virtual spaces"
 
     vertices = map(pairs(adj)) do (vertex, neighbors)
-        P = pspaces[vertex]
-        Vs = ntuple(N) do i
-            return if i <= length(neighbors)
-                Vspace = vspaces[UndirectedEdge(vertex, neighbors[i])]
-                vertex < neighbors[i] ? Vspace : dual(Vspace)
-            else
-                oneunit(S)
-            end
-        end
-        return StateTensor{T, S, N, A}(undef, P ← ⊗(Vs...))
+        Vs = _padded_virtualspaces(S, Val(N), vertex, neighbors, vspaces)
+        return StateTensor{T, S, N, A}(undef, pspaces[vertex] ← ⊗(Vs...))
     end
 
     return TensorNetworkState{T, S, N, A, V}(adj, vertices)
@@ -173,15 +169,6 @@ function TensorNetworkState(
     return TensorNetworkState{Float64}(undef, edges, P, V)
 end
 
-for f! in (:rand!, :randn!)
-    @eval begin
-        Random.$f!(state::TensorNetworkState) =
-            Random.$f!(Random.default_rng(), state)
-        Random.$f!(rng::Random.AbstractRNG, state::TensorNetworkState) =
-            (foreach(Base.Fix1(Random.$f!, rng), values(state.vertices)); state)
-    end
-end
-
 # --- random states ------------------------------------------------------------
 # attach a charge-bath site carrying `dual(total_charge)` through a 1-dimensional
 # bond, so that the physical legs of the remaining vertices fuse to `total_charge`
@@ -266,177 +253,12 @@ As [`randn_state`](@ref), but with uniformly distributed entries.
 
 # Properties
 # ----------
-Base.eltype(::Type{TensorNetworkState{T, S, N, A, V}}) where {T, S, N, A, V} = TensorMap{T, S, 1, N, A}
+num_physical(::Type{<:TensorNetworkState}) = 1
 
-Base.keytype(state::TensorNetworkState) = keytype(typeof(state))
-Base.keytype(::Type{TensorNetworkState{T, S, N, A, V}}) where {T, S, N, A, V} = V
-
-VectorInterface.scalartype(::Type{T}) where {T <: TensorNetworkState} = scalartype(eltype(T))
-TensorKit.storagetype(::Type{T}) where {T <: TensorNetworkState} = storagetype(eltype(T))
-TensorKit.spacetype(::Type{T}) where {T <: TensorNetworkState} = spacetype(eltype(T))
+Base.eltype(::Type{<:TensorNetworkState{T, S, N, A}}) where {T, S, N, A} = StateTensor{T, S, N, A}
 
 Adapt.adapt_structure(to, state::TensorNetworkState) =
     TensorNetworkState(state.adjacency, map(adapt(to), state.vertices))
-
-"""
-    physicalspace(state, vertex) -> S
-
-Return the physical (codomain) space of the on-site tensor at `vertex`.
-"""
-physicalspace(state::TensorNetworkState, vertex) = space(state[vertex], 1)
-
-"""
-    virtualspace(state, edge) -> S
-
-Return the virtual space of `edge` as seen from `first(edge)`.
-
-By convention `virtualspace(state, edge) == dual(virtualspace(state, reverse(edge)))`.
-The *stored* space of an edge is non-dual on its smaller-vertex side, but `space` dualizes
-domain legs, so the space returned here is non-dual when `first(edge) > last(edge)`.
-Throws `ArgumentError` if `edge` is not incident on `first(edge)`.
-"""
-function virtualspace(state::TensorNetworkState, edge)
-    tensor = state[first(edge)]
-    leg_id = leg_index(state, edge)
-    isnothing(leg_id) && throw(KeyError(edge))
-    return space(tensor, leg_id + 1)
-end
-
-Base.length(state::TensorNetworkState) = length(state.vertices)
-
-"""
-    state[v] -> TensorMap
-
-Return the on-site tensor at vertex `v`.
-"""
-@inline Base.getindex(state::TensorNetworkState, v) = state.vertices[v]
-
-
-# --- consistency check --------------------------------------------------------
-"""
-    check_consistency(state) -> Bool
-
-Return `true` if `state` is internally consistent:
-
-- every vertex has at most as many neighbors as its tensor has domain legs, and the domain legs beyond its neighbors are unit spaces
-- every edge's virtual space is the dual of its reverse, and is stored non-dual on the canonical (`first < last`) side.
-"""
-function check_consistency(state::TensorNetworkState)
-    for v in vertices(state)
-        t = state[v]
-        adj = neighbors(state, v)
-        length(adj) <= numin(t) || return false
-
-        for i in (length(adj) + 1):numin(t)
-            isunitspace(domain(t)[i]) || return false
-        end
-    end
-    for edge in edges(state)
-        # `reverse` is the identity on an `UndirectedEdge`, so orient it to compare the two
-        # sides; `virtualspace` dualizes, hence the non-dual side is the *larger* vertex
-        e = DirectedEdge(edge)
-        isdual(virtualspace(state, e)) || return false
-        virtualspace(state, e) == dual(virtualspace(state, reverse(e))) || return false
-    end
-    return true
-end
-
-# --- iteration accessors ------------------------------------------------------
-"""
-    vertices(state)
-
-Return the collection of vertices of `state`.
-"""
-vertices(state::TensorNetworkState) = keys(state.vertices)
-
-"""
-    edges(state)
-
-Return the set of undirected edges of `state` in canonical orientation
-(`first(e) < last(e)`).
-"""
-function edges(state::TensorNetworkState)
-    es = Indices{UndirectedEdge{keytype(state)}}()
-    for v₁ in vertices(state), v₂ in neighbors(state, v₁)
-        v₁ < v₂ && insert!(es, UndirectedEdge(v₁, v₂))
-    end
-    return es
-end
-
-"""
-    neighbors(state, v)
-
-Return the list of neighbors of vertex `v`, in the order matching the virtual legs of `state[v]`.
-"""
-neighbors(state::TensorNetworkState, v) = state.adjacency[v]
-
-"""
-    has_vertex(state, v) -> Bool
-
-Return `true` if `v` is a vertex of `state`.
-"""
-has_vertex(state::TensorNetworkState, v) = haskey(state.adjacency, v)
-
-"""
-    has_edge(state, u, v) -> Bool
-    has_edge(state, e::UndirectedEdge) -> Bool
-
-Return `true` if `state` has an edge between `u` and `v` (equivalently, if
-`v` is a neighbor of `u`).
-"""
-function has_edge(state::TensorNetworkState, u, v)
-    return haskey(state.adjacency, u) && v in state.adjacency[u]
-end
-has_edge(state::TensorNetworkState, e::UndirectedEdge) =
-    has_edge(state, first(e), last(e))
-
-"""
-    degree(state, v) -> Int
-
-Return the number of neighbors of vertex `v` in `state`, i.e. its local
-coordination number. This equals `length(neighbors(state, v))`.
-"""
-degree(state::TensorNetworkState, v) = length(neighbors(state, v))
-
-"""
-    incoming_edges(state, site; exclude=()) -> generator
-
-Iterator over the directed edges `DirectedEdge(n, site)` for every neighbor
-`n` of `site` in `state`, optionally skipping any neighbor present in
-`exclude` (which must be an iterable container of vertex tokens — pass
-`(other_vertex,)` to skip a single neighbor).
-
-The result is a lazy generator suitable for `attach_messages`, `map`, and
-`for` loops. Order matches `neighbors(state, site)`.
-"""
-function incoming_edges(state::TensorNetworkState, site; exclude = ())
-    return (DirectedEdge(n, site) for n in neighbors(state, site) if !(n in exclude))
-end
-
-"""
-    outgoing_edges(state, site; exclude=()) -> generator
-
-Iterator over the directed edges `DirectedEdge(site, n)` for every neighbor
-`n` of `site` in `state`, optionally skipping any neighbor present in
-`exclude`. The reverse of [`incoming_edges`](@ref); order matches
-`neighbors(state, site)`. `collect` it to pass to the vector form of
-[`compute_message`](@ref).
-"""
-function outgoing_edges(state::TensorNetworkState, site; exclude = ())
-    return (DirectedEdge(site, n) for n in neighbors(state, site) if !(n in exclude))
-end
-
-"""
-    leg_index(state, edge) -> Int
-
-Return the 1-based position of `edge` within `neighbors(state, first(edge))`, i.e. the domain-leg index occupied by `edge` in `state[first(edge)]`.
-Throws `ArgumentError` if `edge` is not incident on `first(edge)`.
-"""
-function leg_index(state::TensorNetworkState, edge::AbstractEdge)
-    idx = findfirst(==(last(edge)), neighbors(state, first(edge)))
-    isnothing(idx) && throw(ArgumentError(lazy"edge $edge does not exist"))
-    return idx
-end
 
 # --- dense materialization ----------------------------------------------------
 """
@@ -484,29 +306,4 @@ function TensorKit.TensorMap(state::TensorNetworkState)
     end
 
     return ncon(tensors, indices)
-end
-
-# --- pretty printing ---------------------------------------------------------
-function Base.show(io::IO, ::MIME"text/plain", state::TensorNetworkState)
-    summary(io, state)
-    print(io, " with ", length(state), " vertices:")
-    indent = '\t'
-    inner = IOContext(io, :typeinfo => eltype(state))
-    for v in vertices(state)
-        println(io)
-        println(io)
-        print(io, " vertex ", v, ":")
-        T = state[v]
-        d = length(neighbors(state, v))
-        for k in numin(T):-1:(d + 1)
-            T = removeunit(T, 1 + k)
-        end
-        buf = IOBuffer()
-        show(IOContext(buf, inner), MIME"text/plain"(), T)
-        for line in eachline(IOBuffer(take!(buf)))
-            println(io)
-            print(io, indent, line)
-        end
-    end
-    return nothing
 end

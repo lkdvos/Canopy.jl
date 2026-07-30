@@ -24,7 +24,7 @@ end
 # Randomized BFS spanning tree over the network's own adjacency. Returns the BFS
 # vertex order (root first), the `parent` map (root absent), and the cotree
 # (loop-closing) undirected edges. Assumes a connected network.
-function random_spanning_tree(state::TensorNetworkState, rng)
+function random_spanning_tree(state::AbstractTensorNetwork, rng)
     V = keytype(state)
     verts = collect(vertices(state))
     root = rand(rng, verts)
@@ -53,7 +53,7 @@ end
 # Height-limited BFS from `root` (height counted in edges from root). Returns the
 # BFS vertex order (root first) and the `parent` map (root absent). Modeled on
 # the BFS loop in `random_spanning_tree`, but deterministic and depth-bounded.
-function bfs_tree(network::TensorNetworkState, root, height::Int)
+function bfs_tree(network::AbstractTensorNetwork, root, height::Int)
     V = keytype(network)
     parent = Dictionary{V, V}()
     depth = Dictionary{V, Int}()
