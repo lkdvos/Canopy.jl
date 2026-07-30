@@ -13,10 +13,16 @@ for (topo, statefn, maxiter) in (
         ("ring_L32_D8", () -> ring_state(32, 8), 100),
         ("square_3x3_D4", () -> square_state(3, 3, 4), 50),
     )
-    for (tag, sched) in BENCH_SCHEDULES
+    for (tag, schedfn) in BENCH_SCHEDULES
         SUITE["convergence"][topo, tag] = @benchmarkable(
-            belief_propagation(msgs, state; maxiter = $maxiter, tol = 0, schedule = $sched),
-            setup = (state = $statefn(); msgs = BPMessages(state)),
+            belief_propagation(msgs, state; maxiter = $maxiter, tol = 0, schedule = sched),
+            # `BENCH_SCHEDULES` holds factories rather than instances; the schedule
+            # is built per sample so an RNG-carrying one cannot drift between
+            # samples. See the note in `setup.jl`.
+            setup = (
+                Random.seed!($BENCH_SEED);
+                state = $statefn(); msgs = BPMessages(state); sched = $schedfn()
+            ),
             evals = 1, samples = 10, seconds = 30,
         )
     end

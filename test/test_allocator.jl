@@ -35,7 +35,9 @@ end
 
 @testset "compute_message: Bumper ≡ default ($sname)" for (sname, P, V) in _SPACES
     state, _ = _state_on(grid([3, 3]), P, V; seed = 0)
-    msgs = belief_propagation(BPMessages(state), state; maxiter = 5, tol = 0)
+    msgs = belief_propagation(
+        BPMessages(state), state; maxiter = 5, tol = 0, schedule = SynchronousSchedule()
+    )
     for edge in keys(msgs.messages)
         m_def = compute_message(msgs, state, edge, DefaultBackend(), DefaultAllocator())
         m_bmp = compute_message(msgs, state, edge, DefaultBackend(), Bumper.default_buffer(Bumper.ResizeBuffer))
@@ -46,8 +48,13 @@ end
 
 @testset "belief_propagation: Bumper ≡ default ($sname)" for (sname, P, V) in _SPACES
     state, _ = _state_on(grid([3, 3]), P, V; seed = 1)
-    r_def = belief_propagation(BPMessages(state), state; maxiter = 8, tol = 0, allocator = DefaultAllocator())
-    r_bmp = belief_propagation(BPMessages(state), state; maxiter = 8, tol = 0)  # Bumper default
+    r_def = belief_propagation(
+        BPMessages(state), state; maxiter = 8, tol = 0,
+        allocator = DefaultAllocator(), schedule = SynchronousSchedule(),
+    )
+    r_bmp = belief_propagation(   # Bumper default
+        BPMessages(state), state; maxiter = 8, tol = 0, schedule = SynchronousSchedule()
+    )
     for de in keys(r_def.messages)
         @test r_def[de] ≈ r_bmp[de]
     end

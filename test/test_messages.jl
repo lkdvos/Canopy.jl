@@ -40,7 +40,9 @@ const _MSG_GEOMETRIES = (
     for (sname, P, V) in _MSG_SPACES, (gname, g) in _MSG_GEOMETRIES
         @testset "$sname / $gname" begin
             state = _state_on(g, P, V; seed = hash((sname, gname)))
-            msgs = belief_propagation(BPMessages(state), state; maxiter = 5, tol = 0)
+            msgs = belief_propagation(
+                BPMessages(state), state; maxiter = 5, tol = 0, schedule = SynchronousSchedule()
+            )
             for v in vertices(state)
                 edges = collect(outgoing_edges(state, v))
                 out = compute_message(msgs, state, edges)
@@ -63,7 +65,9 @@ end
     for (sname, P, V) in _MSG_SPACES, (gname, g) in (("star deg 4", star_graph(5)), ("K6", complete_graph(6)))
         @testset "$sname / $gname" begin
             state = _state_on(g, P, V; seed = hash((sname, gname, "sub")))
-            msgs = belief_propagation(BPMessages(state), state; maxiter = 5, tol = 0)
+            msgs = belief_propagation(
+                BPMessages(state), state; maxiter = 5, tol = 0, schedule = SynchronousSchedule()
+            )
             for v in vertices(state)
                 all_e = collect(outgoing_edges(state, v))
                 length(all_e) < 3 && continue
@@ -89,7 +93,9 @@ end
     for (sname, P, V) in _MSG_SPACES, (gname, g) in (("star deg 4", star_graph(5)), ("K6", complete_graph(6)))
         @testset "$sname / $gname" begin
             state = _state_on(g, P, V; seed = hash((sname, gname, "naive")))
-            msgs = belief_propagation(BPMessages(state), state; maxiter = 5, tol = 0)
+            msgs = belief_propagation(
+                BPMessages(state), state; maxiter = 5, tol = 0, schedule = SynchronousSchedule()
+            )
             for v in vertices(state)
                 edges = collect(outgoing_edges(state, v))
                 opt = compute_message(msgs, state, edges)
@@ -133,14 +139,18 @@ end
 # Shared source restriction.
 @testset "compute_message (vector) rejects mismatched source" begin
     state = _state_on(complete_graph(5), ComplexSpace(2), ComplexSpace(3); seed = 7)
-    msgs = belief_propagation(BPMessages(state), state; maxiter = 3, tol = 0)
+    msgs = belief_propagation(
+        BPMessages(state), state; maxiter = 3, tol = 0, schedule = SynchronousSchedule()
+    )
     @test_throws ArgumentError compute_message(msgs, state, [DirectedEdge(1, 2), DirectedEdge(3, 4)])
 end
 
 @testset "compute_message (vector): Bumper ≡ default + allocator hygiene" begin
     for (sname, P, V) in _MSG_SPACES
         state = _state_on(star_graph(5), P, V; seed = hash((sname, "alloc")))
-        msgs = belief_propagation(BPMessages(state), state; maxiter = 5, tol = 0)
+        msgs = belief_propagation(
+            BPMessages(state), state; maxiter = 5, tol = 0, schedule = SynchronousSchedule()
+        )
         for v in vertices(state)
             edges = collect(outgoing_edges(state, v))
             o_def = compute_message(msgs, state, edges, DefaultBackend(), DefaultAllocator())
