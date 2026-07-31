@@ -64,12 +64,11 @@ function splash!(state, network, alg, root, height::Int)
             state.last_used.messages[e] = copy(msgs[e])
             state.residuals[e] = 0.0
         end
-        targets = [DirectedEdge(v, j) for j in neighbors(network, v) if j != get(parent, v, nothing)]
-        new_msgs = recompute_messages(msgs, network, targets, alg.backend, alg.allocator; timer = alg.timer)
-        for (e, new_msg) in zip(targets, new_msgs)
-            msgs.messages[e] = new_msg
-            state.residuals[e] = tr_distance(new_msg, state.last_used[e]; is_hermitian = true)
-        end
+        update_messages_at!(
+            msgs, network, v, alg.backend, alg.allocator;
+            exclude = (get(parent, v, nothing),),
+            residuals = state.residuals, reference = state.last_used, timer = alg.timer,
+        )
     end
     return state
 end

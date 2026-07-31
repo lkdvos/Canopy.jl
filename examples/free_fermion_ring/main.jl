@@ -85,16 +85,23 @@ md"""
 
 Each point is evolved with a Strang-split Trotter circuit over a decreasing-`dτ` schedule,
 re-converging the BP messages between sweeps.
+
+`belief_propagation` is called with `tol = BP_TOL`, so each re-convergence stops as soon as
+the messages stop moving instead of always burning its full `maxiter`. On this ring that is
+reached in a handful of sweeps, well inside the caps below, and `1e-10` is far below the
+truncation error at these bond dimensions — so the numbers are unchanged and the example is
+much cheaper.
 """
 
 const SCHEDULE = ((0.1, 30), (0.01, 30), (0.001, 20))
+const BP_TOL = 1.0e-10
 
 function run_one(L::Int, μ::Real, Dmax::Int; t::Real=1.0, seed::UInt=hash((L, μ, Dmax)))
     Random.seed!(seed)
     T = ComplexF64
     state, ekeys = ring_state(L, Dmax; T)
     msgs = BPMessages(state)
-    msgs = belief_propagation(msgs, state; maxiter=300)
+    msgs = belief_propagation(msgs, state; maxiter=300, tol=BP_TOL)
 
     h_e = fermion_bond_hamiltonian(t, μ, 2, 2; T)
     bond_hams = Dict(e => h_e for e in ekeys)
@@ -106,7 +113,7 @@ function run_one(L::Int, μ::Real, Dmax::Int; t::Real=1.0, seed::UInt=hash((L, �
         circuit = circuits[dτ]
         for i in 1:nsteps
             apply!(state, msgs, circuit; trunc)
-            mod(i, 10) == 0 && (msgs = belief_propagation(msgs, state; maxiter=200))
+            mod(i, 10) == 0 && (msgs = belief_propagation(msgs, state; maxiter=200, tol=BP_TOL))
         end
     end
 
