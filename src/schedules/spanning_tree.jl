@@ -16,6 +16,26 @@ same thing under either schedule.
 Messages are updated **in place**: the [`BPMessages`](@ref) returned by
 [`belief_propagation`](@ref) aliases the one passed in.
 
+# Performance trade-off
+
+An iteration performs `3|E|` directed message updates against `2|E|` for a
+per-edge schedule, but shares each vertex's absorptions across its whole outgoing
+batch, so the cost *per update* falls roughly like `d` for coordination `d`. The
+two effects cut in opposite directions and the crossover is around `d = 3`:
+
+  * **high coordination — a large win.** On a graded honeycomb (`d = 3`,
+    `fℤ₂ ⊠ U1Irrep`, χ = 32) this needs ~4× fewer iterations than
+    [`SynchronousSchedule`](@ref) *and* a ~2.5× cheaper sweep, for a ~3× lower
+    time-to-tolerance than the per-edge spanning-tree schedule it replaced.
+  * **low coordination — a modest loss.** On degree-2 rings and chains a
+    spanning-tree sweep already converged in a handful of iterations, so there is
+    no iteration count left to trade away and the ~1.5× heavier sweep shows up
+    directly: expect ~1.3× the time-to-tolerance. The absolute cost is small
+    (a few iterations over small tensors), which is why this is still the default.
+
+Pass `schedule = SynchronousSchedule()` if you are working exclusively with
+low-coordination lattices and want the older cost profile back.
+
 The default `rng` is seeded, so `belief_propagation` is reproducible and does not
 perturb the global RNG stream. Pass `rng = Random.default_rng()` to opt into
 globally-seeded randomization instead. Note a schedule object holds *mutable* RNG
