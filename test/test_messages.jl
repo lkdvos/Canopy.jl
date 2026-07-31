@@ -20,10 +20,17 @@ using Test
 _state_on(g, P, V; seed) = (Random.seed!(seed); randn_state(ComplexF64, g, P, V))
 
 # (physical, virtual) space pairs spanning trivial / U(1) / fermionic symmetry.
+# The last row is the *production* symmetry (`scripts/hubbard_quench`,
+# `examples/realtime`): graded fermion parity times U(1) charge, where the blocks
+# are many and small rather than few and large.
 const _MSG_SPACES = (
     ("bosonic",   ComplexSpace(2),                        ComplexSpace(3)),
     ("U(1)",      Vect[U1Irrep](0 => 1, 1 => 1),          Vect[U1Irrep](-1 => 1, 0 => 2, 1 => 1)),
     ("fermionic", fermion_space(Trivial),                 Vect[fℤ₂](0 => 2, 1 => 2)),
+    (
+        "fZ2xU1", fermion_space(U1Irrep),
+        Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => 2, (1, 1) => 1, (1, -1) => 1, (0, 2) => 1),
+    ),
 )
 
 # Geometries spanning coordination numbers 1..5 and dual/non-dual leg mixes.

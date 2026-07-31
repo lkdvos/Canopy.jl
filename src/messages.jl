@@ -163,6 +163,7 @@ function _mul_leg!(
         dst::TensorMap{<:Any, S, NP, N}, src::TensorMap{<:Any, S, NP, N}, L, k::Int,
         backend, allocator,
     ) where {S, NP, N}
+    backend = inner_backend(backend)
     M = NP + N
     d = NP + k
     oindA = TupleTools.deleteat(ntuple(identity, M), d)
@@ -183,6 +184,7 @@ function _mul_leg!(
 end
 
 function _absorb_legs(T::TensorMap{Tn, S, NP, N, A}, leg_factors, backend, allocator) where {Tn, S, NP, N, A}
+    backend = inner_backend(backend)
     factors = collect(leg_factors)
     isempty(factors) && return copy(T)
     M = NP + N
@@ -306,6 +308,7 @@ function compute_message!(
         msg, msgs::BPMessages, state::TensorNetworkState, edge::DirectedEdge,
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
+    backend = inner_backend(backend)
     site = first(edge)
     target = leg_index(state, edge)
     T = state[site]
@@ -345,6 +348,10 @@ total rather than once per output); only the chain segments spanning the
 requested targets are built, so a small subset costs proportionally less. Like
 the single-edge method, neither variant mutates `msgs` nor normalises the result;
 `compute_message` allocates the output vector, `compute_message!` fills `out`.
+
+Passing [`BlockedBackend`](@ref) as `backend` selects an alternative formulation
+of the same contraction with fewer copy passes (the `Layout(k)` kernel further
+down this file); [`PairwiseBackend`](@ref) forces this one, which is the default.
 """
 function compute_message(
         msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
@@ -361,6 +368,7 @@ end
 # contraction's one output pass so the active leg stays matrix-form for the next
 # step. `_repartition` does the same for a bare on-site tensor (native order, no msg).
 function _absorb(link, legs, absorbed::Int, msg, newlegs, ncod::Int, backend, allocator)
+    backend = inner_backend(backend)
     M = numind(link)
     ax = findfirst(==(absorbed), legs)
     kept = TupleTools.deleteat(ntuple(identity, M), ax)
@@ -380,6 +388,7 @@ function _absorb(link, legs, absorbed::Int, msg, newlegs, ncod::Int, backend, al
 end
 
 function _repartition(tensor, newlegs, ncod::Int, backend, allocator)
+    backend = inner_backend(backend)
     M = numind(tensor)
     pC = (ntuple(i -> newlegs[i], ncod), ntuple(i -> newlegs[ncod + i], M - ncod))
     result = tensoralloc_add(scalartype(tensor), tensor, pC, false, Val(true), allocator)
@@ -401,6 +410,7 @@ function compute_message!(
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
     isempty(edges) && return out
+    backend = inner_backend(backend)
     v = first(first(edges))
     T = state[v]
     M = numind(T)
@@ -444,6 +454,167 @@ function compute_message!(
             ((2,), (1,)), One(), Zero(), backend, allocator
         )
         allocator_reset!(allocator, cp_close)
+    end
+
+    allocator_reset!(allocator, cp)
+    return out
+end
+
+# --- blocked (`Layout(k)`) vertex-batched kernel -------------------------------
+#
+# Same mathematics as the pairwise kernel above, one *single* layout family for
+# both chains, with the target leg alone in the **domain**:
+#
+#     Layout(k) = (phys, ℓ₁ … ℓ̂ₖ … ℓ_N) ← (ℓₖ)
+#
+# (`suffix_legs(k)` with `ncod = M - 1`, i.e. the pairwise *bra* chain's family —
+# the ket chain's `prefix_legs` family is the one that goes away.) Consequences:
+#
+#  1. `Layout(k) → Layout(k±1)` is the single transposition of axes `k+1` and `M`,
+#     one copy-kernel shape for both chains and every step;
+#  2. the absorbed leg is always the sole domain leg, so every absorption is a
+#     composition — one `gemm` per coupled sector, and no repartition of the link
+#     (the pairwise ket chain pays a full `dim(T)` copy per step for it);
+#  3. the closing `adjoint(S_k) * P_k` is one `gemm('C', 'N')` per coupled sector
+#     writing `out[i]` in its **natural** partition, removing both the `copyC`
+#     repartition and the `twist!` copy of the link the pairwise closing forces.
+#
+# Copy passes over `dim(T)`: `2d` (two entry braids plus one per chain step),
+# against ~`4d - 2` plus `2d` `twist!` passes on the pairwise path.
+#
+# ## Fermionic signs
+#
+# `blas_contract!` (`TensorKit/src/tensors/tensoroperations.jl:392-460`) is
+# "permute `A` to `pA`, permute `B` to `pB`, compose, and apply `twist(σ_ℓ)` once
+# per contracted leg pair that is **dual on the `B` side**". `*` / `mul!` is the
+# bare composition, so a contraction written with `mul!` here is short exactly
+# that factor. With `σ_ℓ` the sector on leg `ℓ` of `T` (`ℓ = 1` physical,
+# `ℓ = j + 1` virtual leg `j`):
+#
+#   * absorption of message `j` (`A` = link, `B` = message, `cindB = (2,)`, and
+#     `space(msg, 2) == dual(space(T, j + 1))`): missing factor `twist(σⱼ)` iff
+#     `!isdual(space(T, j + 1))`;
+#   * closing at target `k` (`A = adjoint(S_k)`, `B = P_k`, `cindB` = `P_k`'s
+#     codomain = every leg but `k + 1`): missing factor
+#     `∏_{ℓ ≠ k+1, isdual(space(T, ℓ))} twist(σ_ℓ)`.
+#
+# Both are diagonal in `σ`, and `σ` is invariant along either chain (messages are
+# sector-diagonal; the braids only relabel axes), so the two combine into one
+# per-`σ` scalar. Writing `Z(σ) = ∏_{ℓ : isdual(space(T, ℓ))} twist(σ_ℓ)` and
+# using `twist(σ)² = 1` (`UniqueFusion` + `SymmetricBraiding` ⇒ `twist ∈ {±1}`),
+# the total correction for target `k` is
+#
+#     Z(σ) · twist(σₖ)^{[isdual(space(T, k+1))]}
+#         = twist(σ_phys)^{[isdual(space(T, 1))]} · ∏_{j ≠ k} twist(σⱼ) .
+#
+# Every leg `j ≠ k` is absorbed exactly once for target `k` (ket chain if `j < k`,
+# bra chain if `j > k`), so `twist(σⱼ)` folds into the **transposed message** (a χ²
+# pass, in `_blocked_step`) and the only remainder is the physical leg, folded into
+# the ket entry copy when the physical space is dual. Padded legs carry the unit
+# sector (`twist(unit) == 1`) and drop out. Net: no `twist!` pass over any chain
+# link and none on the output.
+#
+# The literal reading of the two bullets — fold all of `Z` into the ket entry,
+# twist message `j` only when `!isdual(space(T, j+1))`, and finish with
+# `twist!(out[i], (1,))` when `isdual(space(T, k+1))` — is the same scalar
+# distributed differently, and was checked to agree numerically; it costs one
+# extra `dim(T)`-sized pass, which is why the factors live on the messages here.
+
+# One chain step: absorb `msg` (an incoming message, or its adjoint for the bra
+# chain) into the sole domain leg of the `Layout` link `link` and re-emit in the
+# neighbouring layout, `p` being the axis transposition.
+#
+# `msg` is transposed to `pmsg = ((2,), (1,))` so that composition contracts its
+# ket index and leaves its bra index as the new leg, and twisted on its codomain
+# leg — the per-coupled-sector `twist(σⱼ)` derived above, at χ² cost. The
+# composition itself is one `gemm` per coupled sector with no copy of `link`
+# (`pid` is `link`'s own partition and only sizes the output buffer).
+#
+# Both temporaries are taken above a checkpoint and released before returning, so
+# only the chain links stay live. The transposed message is rebuilt per step
+# rather than cached per leg: a message used by both chains costs one extra χ²
+# permute, against `d` message-sized allocations held for the whole call — which
+# is a *worse* trade at low coordination, where the on-site tensor is small.
+function _blocked_step(link, msg, pmsg, pid, p, backend, allocator)
+    result = tensoralloc_add(scalartype(link), link, p, false, Val(true), allocator)
+    cp = allocator_checkpoint!(allocator)
+    mt = tensoralloc_add(scalartype(msg), msg, pmsg, false, Val(true), allocator)
+    tensoradd!(mt, msg, pmsg, false, One(), Zero(), backend, allocator)
+    twist!(mt, (1,))
+    tmp = tensoralloc_add(scalartype(link), link, pid, false, Val(true), allocator)
+    mul!(tmp, link, mt)
+    tensoradd!(result, tmp, p, false, One(), Zero(), backend, allocator)
+    allocator_reset!(allocator, cp)
+    return result
+end
+
+function compute_message!(
+        out, msgs::BPMessages, state::TensorNetworkState,
+        edges::AbstractVector{<:DirectedEdge}, backend::BlockedBackend,
+        allocator = default_allocator(state),
+    )
+    isempty(edges) && return out
+    inner = inner_backend(backend)
+    # Non-abelian / non-`Array` / `Trivial`: the pairwise kernel stays the oracle.
+    uses_blocked_kernel(state[first(first(edges))]) ||
+        return compute_message!(out, msgs, state, edges, inner, allocator)
+    return _blocked_message!(out, msgs, state, edges, inner, allocator)
+end
+
+function _blocked_message!(
+        out, msgs::BPMessages, state::TensorNetworkState,
+        edges::AbstractVector{<:DirectedEdge}, backend, allocator,
+    )
+    v = first(first(edges))
+    T = state[v]
+    M = numind(T)
+    nbrs = neighbors(state, v)
+    d = length(nbrs)
+    target_legs = map(edges) do e
+        first(e) == v || throw(ArgumentError(lazy"edge $e does not leave the shared source $v"))
+        return leg_index(state, e)
+    end
+    legmin, legmax = extrema(target_legs)
+
+    # Every space query is hoisted here: the loops below touch only tensors.
+    allinds = ntuple(identity, M)
+    layout(k) = (TupleTools.deleteat(allinds, k + 1), (k + 1,))    # Layout(k)
+    pid = (ntuple(identity, M - 1), (M,))                          # a layout's own partition
+    pswap(j) = (ntuple(i -> ifelse(i == j, M, i), M - 1), (j,))     # Layout(j-1) ↔ Layout(j)
+    pmsg = ((2,), (1,))                                            # message → composable form
+    dual_phys = isdual(space(T, 1))
+
+    incoming = map(n -> msgs[DirectedEdge(n, v)], nbrs)
+
+    cp = allocator_checkpoint!(allocator)
+
+    # ket chain, `Layout(1)` up to `Layout(legmax)`: `ket[k]` has messages 1 … k-1
+    # absorbed. The link type is read off the first link, so the container is
+    # concrete and GPU-portable.
+    ket1 = tensoralloc_add(scalartype(T), T, layout(1), false, Val(true), allocator)
+    tensoradd!(ket1, T, layout(1), false, One(), Zero(), backend, allocator)
+    dual_phys && twist!(ket1, (1,))            # the physical leg's `Z` factor
+    ket = Vector{typeof(ket1)}(undef, d)
+    ket[1] = ket1
+    for k in 1:(legmax - 1)
+        ket[k + 1] = _blocked_step(ket[k], incoming[k], pmsg, pid, pswap(k + 1), backend, allocator)
+    end
+
+    # bra chain, `Layout(d)` down to `Layout(legmin)`: `bra[k]` has messages
+    # k+1 … d absorbed, as adjoints — conjugated by the closing.
+    brad = tensoralloc_add(scalartype(T), T, layout(d), false, Val(true), allocator)
+    tensoradd!(brad, T, layout(d), false, One(), Zero(), backend, allocator)
+    bra = Vector{typeof(brad)}(undef, d)
+    bra[d] = brad
+    for k in (d - 1):-1:legmin
+        bra[k] = _blocked_step(
+            bra[k + 1], adjoint(incoming[k + 1]), pmsg, pid, pswap(k + 1), backend, allocator
+        )
+    end
+
+    # closing: one `gemm('C', 'N')` per coupled sector, straight into `out[i]`.
+    for (i, k) in enumerate(target_legs)
+        mul!(out[i], adjoint(bra[k]), ket[k])
     end
 
     allocator_reset!(allocator, cp)

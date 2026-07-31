@@ -33,6 +33,8 @@ using OpenQASM.Types: RegDecl, Include, Gate, Instruction, UGate, CXGate, Barrie
     Measure, Reset, IfStmt, Opaque, Bit, Call, Neg
 
 include("bumper.jl")
+include("backends.jl")
+export BlockedBackend, PairwiseBackend
 
 include("edges.jl")
 

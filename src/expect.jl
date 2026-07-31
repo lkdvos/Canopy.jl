@@ -56,6 +56,7 @@ function reduced_density_matrix(
         sites::NTuple{1, V}, net::AbstractTensorNetwork, messages::BPMessages;
         backend = DefaultBackend(), allocator = default_allocator(net),
     ) where {V}
+    backend = inner_backend(backend)
     site = only(sites)
     np = num_physical(net)
     Tm = _twist_physical!(attach_all_messages(net, messages, site, backend, allocator), np)
@@ -72,6 +73,7 @@ function reduced_density_matrix(
         sites::NTuple{2, V}, net::AbstractTensorNetwork, messages::BPMessages;
         backend = DefaultBackend(), allocator = default_allocator(net),
     ) where {V}
+    backend = inner_backend(backend)
     has_edge(net, sites...) || error("not implemented")
     s₁, s₂ = sites
     np = num_physical(net)

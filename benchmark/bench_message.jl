@@ -69,16 +69,33 @@ for Dmax in [8, 16, 32]
 end
 
 # Vertex-centric kernel at a degree-3 honeycomb vertex, over every symmetry in
-# `BENCH_SPACES` at equal total χ. The primary fixture.
-for (sym, P, V) in BENCH_SPACES, χ in MSG_CHIS
-    SUITE["message"]["hex_vertex", sym, χ] = @benchmarkable(
-        compute_message!(out, msgs, state, edges),
+# `BENCH_SPACES` at equal total χ, and over both kernels. The primary fixture.
+#
+# The backend axis is deliberately *inside one run*: the phase-2 gate is the
+# `:blocked` / `:pairwise` ratio per `(sym, χ)`, and a ratio taken from two keys
+# of the same `run(SUITE)` is immune to machine drift between runs — which
+# matters, since the noise floor was measured at loadavg ~3.5 and these are
+# shared boxes. `:pairwise` is the same code path as the default, made explicit,
+# so it is also the noise control for this group.
+#
+# `:trivial` must be *unaffected*: `uses_blocked_kernel` excludes `Trivial`, so
+# the `:blocked` key falls straight back to the pairwise kernel and the two keys
+# must agree to within noise.
+const MSG_BACKENDS = (
+    :pairwise => PairwiseBackend(),
+    :blocked => BlockedBackend(),
+)
+
+for (sym, P, V) in BENCH_SPACES, χ in MSG_CHIS, (bname, bk) in MSG_BACKENDS
+    SUITE["message"]["hex_vertex", sym, χ, bname] = @benchmarkable(
+        compute_message!(out, msgs, state, edges, $bk, buf),
         setup = (
             Random.seed!($BENCH_SEED);
             state = hex_state(2, 2, $χ; P = $P, V = $V);
             msgs = cold_messages(state);
             edges = collect(outgoing_edges(state, $HEX_VERTEX));
-            out = compute_message(msgs, state, edges)
+            out = compute_message(msgs, state, edges);
+            buf = Bumper.default_buffer(Bumper.ResizeBuffer)
         ),
     )
 end
