@@ -13,23 +13,10 @@ abstract type AbstractGate{T <: Number, S <: ElementarySpace, V} end
     sites(gate) -> NTuple{N, V}
 
 The vertices `gate` acts on. Defaults to the `sites` field, which
-[`LocalGate`](@ref) has; wrappers such as [`SandwichGate`](@ref) forward to the gate they
-wrap, so callers should use this rather than reaching for `gate.sites`.
+[`LocalGate`](@ref) has; other gate types may compute it, so callers should use this rather
+than reaching for `gate.sites`.
 """
 sites(g::AbstractGate) = g.sites
-
-"""
-    Canopy._acted_slots(gate) -> Tuple{Vararg{Int}}
-
-Which physical (codomain) slots of an on-site tensor a gate acts on. `(1,)` by default —
-the only choice for a state — and `(1,)` / `(2,)` / `(1, 2)` for the sided operator gates
-[`LeftGate`](@ref), [`RightGate`](@ref) and [`SandwichGate`](@ref).
-
-This is the single parameter the generic two-site kernel needs: slots *not* acted on stay in
-the QR environment, so a one-sided operator gate costs exactly what the same gate costs on a
-state.
-"""
-_acted_slots(::AbstractGate) = (1,)
 
 Base.keytype(g::AbstractGate) = keytype(typeof(g))
 Base.keytype(::Type{<:AbstractGate{T, S, V}}) where {T, S, V} = V

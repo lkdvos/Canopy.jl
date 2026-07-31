@@ -76,7 +76,7 @@ space:
 ```julia
 msgs = BPMessages(ρ)                                  # forwards through the fused view
 msgs = belief_propagation(msgs, ρ; maxiter = 50, tol = 1e-10)
-apply!(ρ, msgs, SandwichGate(gate); trunc)            # messages are usable on the operator
+apply!(ρ, msgs, gate; trunc)                          # messages are usable on the operator
 ```
 
 `TensorNetworkState(op)` is that
@@ -98,39 +98,44 @@ there instead of quietly corrupting BP.
 
 ## Gate application: one-sided and two-sided
 
-Wrap a gate to say which physical legs it acts on. For a wrapped `G : P′ ← P`:
+The `action::`[`GateAction`](@ref) keyword of [`apply!`](@ref) says which physical legs a gate
+acts on. For `G : P′ ← P` at gate slot `i`:
 
-| Wrapper | Action | Slot 1 (ket) | Slot 2 (bra) | Requires |
+| `action` | Action | Slot 1 (ket) | Slot 2 (bra) | Requires |
 |---|---|---|---|---|
-| [`LeftGate`](@ref) | `ρ ↦ Gρ` | `G`'s **domain** | untouched | `physicalspace(op, v, 1) == domain(G)[i]` |
-| [`RightGate`](@ref) | `ρ ↦ ρG` | untouched | `G`'s **codomain** | `physicalspace(op, v, 2) == dual(codomain(G)[i])` |
-| [`SandwichGate`](@ref) | `ρ ↦ GρG†` | `G`'s domain | `G†`'s codomain | both, i.e. [`isvectorized`](@ref Canopy.isvectorized) |
+| [`LeftAction`](@ref) | `ρ ↦ Gρ` | `G`'s **domain** | untouched | `physicalspace(op, v, 1) == domain(G)[i]` |
+| [`RightAction`](@ref) | `ρ ↦ ρG` | untouched | `G`'s **codomain** | `physicalspace(op, v, 2) == dual(codomain(G)[i])` |
+| [`SandwichAction`](@ref) | `ρ ↦ GρG†` | `G`'s domain | `G†`'s codomain | both, i.e. [`isvectorized`](@ref Canopy.isvectorized) |
 
 ```julia
-apply!(ρ, msgs, SandwichGate(LocalGate((u, v), G)); trunc = truncrank(χ))
-apply!(ρ, msgs, LeftGate(LocalGate((u, v), G)); trunc)
+apply!(ρ, msgs, LocalGate((u, v), G); trunc = truncrank(χ))                     # SandwichAction
+apply!(ρ, msgs, LocalGate((u, v), G); action = LeftAction, trunc)
 ```
+
+`SandwichAction` is the default, since two-sided evolution is what a density matrix wants. On a
+[`TensorNetworkState`](@ref) the keyword is an error rather than a silent no-op: a state has a
+single physical leg and hence no choice to make.
 
 Note the asymmetry in the table: right-multiplication consumes the gate's **codomain** and
 produces its domain, the mirror of the left action. That is not a quirk of the implementation
 — `ρG` pairs `ρ`'s column index with `G`'s row index, and the dual slot-2 leg supplies the
 transpose for free.
 
-Because the side is part of the gate rather than a keyword, a circuit can mix sides, there is
-no default to get wrong, and the aggregates compose unchanged. Wrapping a
-`CompositeGate` or `Circuit` distributes over its gate list, so a Trotter
-circuit is reusable verbatim:
+Because the action is a keyword rather than part of the gate, gates carry no side information
+and the aggregates need no special casing: `apply!` forwards its keywords to every gate in a
+`CompositeGate` or `Circuit`, so a Trotter circuit is reusable verbatim under any action:
 
 ```julia
 circuit = trotterize(bond_hams, dτ, Strang())
-apply!(ρ, msgs, SandwichGate(circuit); trunc = truncrank(χ))
+apply!(ρ, msgs, circuit; trunc = truncrank(χ))                  # two-sided
+apply!(X, msgs, circuit; action = LeftAction, trunc)            # one-sided, e.g. on a purification
 ```
 
 ### Cost
 
 A one-sided gate costs exactly what the same gate costs on a state: the physical leg the gate
 does *not* touch stays in the environment `Q` rather than entering the `R` factor, so `R`
-remains `d·χ`. Only [`SandwichGate`](@ref) puts both legs in `R`, paying `d²` there and up to
+remains `d·χ`. Only [`SandwichAction`](@ref) puts both legs in `R`, paying `d²` there and up to
 `d²χ` in the new bond dimension. That is inherent to two-sided evolution, and is the honest
 argument for the one-sided/purification workflow below.
 
@@ -140,7 +145,7 @@ Belief propagation on a two-physical-leg network converges the environment of `t
 `tr(ρ)` — `compute_message!` closes ket against bra over *all* physical legs. This is the
 right and the only free choice, and it has one consequence that is very easy to get wrong:
 
-- Evolving `ρ = exp(-βH)` two-sided with `SandwichGate(exp(-dτ H))` advances `β` by **`2dτ`**
+- Evolving `ρ = exp(-βH)` two-sided with `exp(-dτ H)` advances `β` by **`2dτ`**
   per step, because the gate is applied on both sides.
 - Equivalently, and often more convenient: treat the network as `X = exp(-βH/2)` and evolve
   it **one-sided**. Then `⟨O⟩ = tr(X†OX) / tr(X†X)` is the thermal average at `β`, and it is
@@ -172,7 +177,8 @@ identity_operator
 randn_operator
 rand_operator
 Canopy.physicalspaces
-LeftGate
-RightGate
-SandwichGate
+GateAction
+LeftAction
+RightAction
+SandwichAction
 ```

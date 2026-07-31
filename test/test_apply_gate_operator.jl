@@ -1,6 +1,6 @@
 using Canopy
 using Canopy: TensorNetworkOperator, TensorNetworkState, BPMessages, UndirectedEdge, DirectedEdge,
-              LocalGate, LeftGate, RightGate, SandwichGate, CompositeGate, Circuit,
+              LocalGate, LeftAction, RightAction, SandwichAction, CompositeGate, Circuit,
               identity_operator, randn_operator, isvectorized, check_consistency,
               physicalspace, physicalspaces, virtualspace, degree, apply!, belief_propagation
 using TensorKit
@@ -82,52 +82,64 @@ const _OP_GATE_SPACES = [
     ρ, msgs = _fresh(es, P)
     g = id(P)
     G = id(P ⊗ P)
-    @test_throws ArgumentError apply!(ρ, msgs, SandwichGate(LocalGate((1,), g)))
-    @test_throws ArgumentError apply!(ρ, msgs, LeftGate(LocalGate((1, 2), G)))
+    @test_throws ArgumentError apply!(ρ, msgs, LocalGate((1,), g); action = SandwichAction)
+    @test_throws ArgumentError apply!(ρ, msgs, LocalGate((1, 2), G); action = LeftAction)
     # a state on the same space still works — the guard is operator-only
     ψ = randn_state(ComplexF64, es, P, Vect[fℤ₂](0 => 1, 1 => 1))
     @test apply!(ψ, BPMessages(ψ), LocalGate((1,), g)) isa Tuple
 end
 
-@testset "SandwichGate requires a vectorized operator" begin
+@testset "SandwichAction requires a vectorized operator" begin
     P, V = ComplexSpace(2), ComplexSpace(2)
     es = [UndirectedEdge(1, 2), UndirectedEdge(2, 3)]
     ψ = randn_state(ComplexF64, es, P, V)
     purification = TensorNetworkOperator(ψ)          # trivial ancilla, so slot 2 ≠ dual(slot 1)
     @test !isvectorized(purification)
     msgs = BPMessages(purification)
-    @test_throws SpaceMismatch apply!(purification, msgs, SandwichGate(LocalGate((1,), id(P))))
+    @test_throws SpaceMismatch apply!(purification, msgs, LocalGate((1,), id(P)); action = SandwichAction)
     # ... but a one-sided gate on the ket leg is perfectly fine on a purification
-    @test apply!(purification, msgs, LeftGate(LocalGate((1,), id(P)))) isa Tuple
+    @test apply!(purification, msgs, LocalGate((1,), id(P)); action = LeftAction) isa Tuple
+end
+
+@testset "`action` on a state is rejected, not ignored" begin
+    P, V = ComplexSpace(2), ComplexSpace(2)
+    es = [UndirectedEdge(1, 2), UndirectedEdge(2, 3)]
+    ψ = randn_state(ComplexF64, es, P, V)
+    msgs = BPMessages(ψ)
+    g, G = id(P), id(P ⊗ P)
+    for action in (LeftAction, RightAction, SandwichAction)
+        @test_throws ArgumentError apply!(ψ, msgs, LocalGate((1,), g); action)
+        @test_throws ArgumentError apply!(ψ, msgs, LocalGate((1, 2), G); action)
+    end
 end
 
 @testset "Gate space mismatches are caught" begin
     P, Q, V = ComplexSpace(2), ComplexSpace(3), ComplexSpace(2)
     es = [UndirectedEdge(1, 2), UndirectedEdge(2, 3)]
     ρ, msgs = _fresh(es, P)
-    @test_throws SpaceMismatch apply!(ρ, msgs, LeftGate(LocalGate((1,), id(Q))))
-    @test_throws KeyError apply!(ρ, msgs, LeftGate(LocalGate((7,), id(P))))
+    @test_throws SpaceMismatch apply!(ρ, msgs, LocalGate((1,), id(Q)); action = LeftAction)
+    @test_throws KeyError apply!(ρ, msgs, LocalGate((7,), id(P)); action = LeftAction)
     # two-site gate on a non-edge
-    @test_throws ArgumentError apply!(ρ, msgs, SandwichGate(LocalGate((1, 3), id(P ⊗ P))))
+    @test_throws ArgumentError apply!(ρ, msgs, LocalGate((1, 3), id(P ⊗ P)); action = SandwichAction)
 end
 
 # --- one-site gates -----------------------------------------------------------
 
-@testset "One-site sided gates against dense — $sname" for (sname, P, _) in _OP_GATE_SPACES
+@testset "One-site gate actions against dense — $sname" for (sname, P, _) in _OP_GATE_SPACES
     es = [UndirectedEdge(1, 2), UndirectedEdge(2, 3)]
     n = 3
     pspaces = fill(P, n)
     g = _random_hermitian(P; seed = 3)
     𝒢 = _embed(g, n, (2,), pspaces)
 
-    for (name, W, reference) in (
-            ("LeftGate", LeftGate, ρd -> 𝒢 * ρd),
-            ("RightGate", RightGate, ρd -> ρd * 𝒢),
-            ("SandwichGate", SandwichGate, ρd -> 𝒢 * ρd * 𝒢'),
+    for (action, reference) in (
+            (LeftAction, ρd -> 𝒢 * ρd),
+            (RightAction, ρd -> ρd * 𝒢),
+            (SandwichAction, ρd -> 𝒢 * ρd * 𝒢'),
         )
         ρ, msgs = _fresh(es, P)
         before = _dense(ρ)
-        apply!(ρ, msgs, W(LocalGate((2,), g)))
+        apply!(ρ, msgs, LocalGate((2,), g); action)
         @test check_consistency(ρ)
         @test isvectorized(ρ)
         @test _dense(ρ) ≈ reference(before) rtol = 1e-10
@@ -141,26 +153,26 @@ end
     es = [UndirectedEdge(1, 2)]
     g = _random_hermitian(P; seed = 4)
     𝒢 = _embed(g, 2, (1,), fill(P, 2))
-    for (W, reference) in (
-            (LeftGate, ρd -> 𝒢 * ρd), (RightGate, ρd -> ρd * 𝒢), (SandwichGate, ρd -> 𝒢 * ρd * 𝒢'),
+    for (action, reference) in (
+            (LeftAction, ρd -> 𝒢 * ρd), (RightAction, ρd -> ρd * 𝒢), (SandwichAction, ρd -> 𝒢 * ρd * 𝒢'),
         )
         ρ, msgs = _fresh(es, P)
         before = _dense(ρ)
-        apply!(ρ, msgs, W(LocalGate((1,), g)))
+        apply!(ρ, msgs, LocalGate((1,), g); action)
         @test _dense(ρ) ≈ reference(before) rtol = 1e-10
     end
 end
 
-@testset "One-site LeftGate can change the physical space" begin
+@testset "One-site LeftAction can change the physical space" begin
     P, Q = ComplexSpace(2), ComplexSpace(3)
     es = [UndirectedEdge(1, 2)]
     ρ, msgs = _fresh(es, P)
     g = randn(ComplexF64, Q, P)                       # Q ← P
-    apply!(ρ, msgs, LeftGate(LocalGate((1,), g)))
+    apply!(ρ, msgs, LocalGate((1,), g); action = LeftAction)
     @test physicalspaces(ρ, 1) == (Q, dual(P))
     @test !isvectorized(ρ)                            # Gρ for rectangular G is not square
-    # RightGate on the same site restores squareness
-    apply!(ρ, msgs, RightGate(LocalGate((1,), g')))    # ρ ↦ ρ g', consuming codomain(g') = P
+    # a right action on the same site restores squareness
+    apply!(ρ, msgs, LocalGate((1,), g'); action = RightAction)    # ρ ↦ ρ g', consuming codomain(g') = P
     @test physicalspaces(ρ, 1) == (Q, dual(Q))
     @test isvectorized(ρ)
 end
@@ -170,21 +182,21 @@ end
 @testset "Two-site identity gates are no-ops — $sname / $gname" for
         (sname, P, V) in _OP_GATE_SPACES, (gname, g) in _OP_GEOMETRIES
     # Compared on the *dense* operator, not tensor-by-tensor: the SVD re-gauges the bond, and
-    # with `notrunc()` a `SandwichGate` legitimately grows it to `d²χ` (the extra Schmidt
+    # with `notrunc()` a `SandwichAction` legitimately grows it to `d²χ` (the extra Schmidt
     # values are zero). Neither changes the operator the network represents.
     G = id(P ⊗ P)
-    for W in (LeftGate, RightGate, SandwichGate)
+    for action in (LeftAction, RightAction, SandwichAction)
         ρ, msgs = _fresh_random(g, P, V; seed = 21)
         before = _dense(ρ)
         e = first(edges(ρ))
-        apply!(ρ, msgs, W(LocalGate((first(e), last(e)), G)); trunc = notrunc(), normp = 0)
+        apply!(ρ, msgs, LocalGate((first(e), last(e)), G); action, trunc = notrunc(), normp = 0)
         @test check_consistency(ρ)
         @test check_consistency(ρ, msgs)
         @test _dense(ρ) ≈ before rtol = 1e-10
     end
 end
 
-@testset "Two-site sided gates against dense — $sname / $gname" for
+@testset "Two-site gate actions against dense — $sname / $gname" for
         (sname, P, V) in _OP_GATE_SPACES, (gname, g) in _OP_GEOMETRIES
     G = _random_unitary_gate(P; seed = 5)
     ρ0, _ = _fresh_random(g, P, V; seed = 22)
@@ -196,14 +208,14 @@ end
     ps = (findfirst(==(u), verts), findfirst(==(v), verts))
     𝒢 = _embed(G, n, ps, pspaces)
 
-    for (name, W, reference) in (
-            ("LeftGate", LeftGate, ρd -> 𝒢 * ρd),
-            ("RightGate", RightGate, ρd -> ρd * 𝒢),
-            ("SandwichGate", SandwichGate, ρd -> 𝒢 * ρd * 𝒢'),
+    for (action, reference) in (
+            (LeftAction, ρd -> 𝒢 * ρd),
+            (RightAction, ρd -> ρd * 𝒢),
+            (SandwichAction, ρd -> 𝒢 * ρd * 𝒢'),
         )
         ρ, msgs = _fresh_random(g, P, V; seed = 22)
         before = _dense(ρ)
-        apply!(ρ, msgs, W(LocalGate((u, v), G)); trunc = notrunc(), normp = 0)
+        apply!(ρ, msgs, LocalGate((u, v), G); action, trunc = notrunc(), normp = 0)
         @test check_consistency(ρ)
         @test isvectorized(ρ)
         @test _dense(ρ) ≈ reference(before) rtol = 1e-10
@@ -211,24 +223,27 @@ end
         # reverse site order with the correspondingly permuted gate must agree — this is what
         # validates the canonical-orientation swap for two physical legs
         ρr, msgsr = _fresh_random(g, P, V; seed = 22)
-        apply!(ρr, msgsr, W(LocalGate((v, u), permute(G, ((2, 1), (4, 3))))); trunc = notrunc(), normp = 0)
+        apply!(
+            ρr, msgsr, LocalGate((v, u), permute(G, ((2, 1), (4, 3))));
+            action, trunc = notrunc(), normp = 0,
+        )
         @test _dense(ρr) ≈ _dense(ρ) rtol = 1e-10
     end
 end
 
-@testset "SandwichGate round-trip g then g† restores the operator — $sname / $gname" for
+@testset "SandwichAction round-trip g then g† restores the operator — $sname / $gname" for
         (sname, P, V) in _OP_GATE_SPACES, (gname, g) in _OP_GEOMETRIES
     G = _random_unitary_gate(P; seed = 6)
     ρ, msgs = _fresh_random(g, P, V; seed = 23)
     before = _dense(ρ)
     e = first(edges(ρ))
     u, v = first(e), last(e)
-    apply!(ρ, msgs, SandwichGate(LocalGate((u, v), G)); trunc = notrunc(), normp = 0)
-    apply!(ρ, msgs, SandwichGate(LocalGate((u, v), G')); trunc = notrunc(), normp = 0)
+    apply!(ρ, msgs, LocalGate((u, v), G); action = SandwichAction, trunc = notrunc(), normp = 0)
+    apply!(ρ, msgs, LocalGate((u, v), G'); action = SandwichAction, trunc = notrunc(), normp = 0)
     @test _dense(ρ) ≈ before rtol = 1e-10
 end
 
-@testset "SandwichGate ≡ LeftGate then RightGate — $sname / $gname" for
+@testset "SandwichAction ≡ LeftAction then RightAction — $sname / $gname" for
         (sname, P, V) in _OP_GATE_SPACES, (gname, g) in _OP_GEOMETRIES
     # Dense-reference-free: the joint two-sided kernel must agree with applying the two
     # one-sided actions in sequence, since the intermediate SVD is exact and the gauge factors
@@ -239,13 +254,13 @@ end
     e = first(edges(ρa))
     u, v = first(e), last(e)
 
-    apply!(ρa, msgsa, SandwichGate(LocalGate((u, v), G)); trunc = notrunc(), normp = 0)
-    apply!(ρb, msgsb, LeftGate(LocalGate((u, v), G)); trunc = notrunc(), normp = 0)
-    apply!(ρb, msgsb, RightGate(LocalGate((u, v), G')); trunc = notrunc(), normp = 0)
+    apply!(ρa, msgsa, LocalGate((u, v), G); action = SandwichAction, trunc = notrunc(), normp = 0)
+    apply!(ρb, msgsb, LocalGate((u, v), G); action = LeftAction, trunc = notrunc(), normp = 0)
+    apply!(ρb, msgsb, LocalGate((u, v), G'); action = RightAction, trunc = notrunc(), normp = 0)
     @test _dense(ρa) ≈ _dense(ρb) rtol = 1e-10
 end
 
-@testset "SandwichGate preserves hermiticity and trace — $gname" for (gname, g) in _OP_GEOMETRIES
+@testset "SandwichAction preserves hermiticity and trace — $gname" for (gname, g) in _OP_GEOMETRIES
     P, V = ComplexSpace(2), ComplexSpace(2)
     # Starting from 𝟙, `ρ ↦ GρG†` must stay Hermitian for *any* G, and preserve the trace when
     # G is unitary. A missing conjugation or transpose on the bra side breaks this immediately,
@@ -257,7 +272,7 @@ end
         ρ, msgs = _fresh(g, P)
         e = first(edges(ρ))
         tr_before = tr(_dense(ρ))
-        apply!(ρ, msgs, SandwichGate(LocalGate((first(e), last(e)), G)); trunc = notrunc(), normp = 0)
+        apply!(ρ, msgs, LocalGate((first(e), last(e)), G); action = SandwichAction, trunc = notrunc(), normp = 0)
         d = _dense(ρ)
         @test d ≈ d' rtol = 1e-10
         label == "unitary" && @test tr(d) ≈ tr_before rtol = 1e-10
@@ -278,8 +293,8 @@ end
 
     e = first(edges(ρ))
     u, v = first(e), last(e)
-    for W in (LeftGate, RightGate, SandwichGate)
-        _, _, info = apply!(ρ, msgs, W(LocalGate((u, v), G)); trunc = truncrank(4), normp = 0)
+    for action in (LeftAction, RightAction, SandwichAction)
+        _, _, info = apply!(ρ, msgs, LocalGate((u, v), G); action, trunc = truncrank(4), normp = 0)
         @test check_consistency(ρ)
         @test check_consistency(ρ, msgs)
         @test isvectorized(ρ)
@@ -291,9 +306,9 @@ end
     # Everything here stays local on purpose. Nothing dense is materialized: with 9 sites and
     # two physical legs each the wavefunction is `dim(P)^18`, and a periodic grid gives `ncon`
     # no good contraction order — the norm/trace invariants are checked on the small geometries
-    # instead ("SandwichGate preserves hermiticity and trace").
+    # instead ("SandwichAction preserves hermiticity and trace").
     ρ2, msgs2 = _fresh(g, P)                       # 1-dimensional bonds ⇒ BP is exact here
-    apply!(ρ2, msgs2, SandwichGate(LocalGate((u, v), G)); trunc = notrunc(), normp = 0)
+    apply!(ρ2, msgs2, LocalGate((u, v), G); action = SandwichAction, trunc = notrunc(), normp = 0)
     @test check_consistency(ρ2)
     @test check_consistency(ρ2, msgs2)
     @test isvectorized(ρ2)
@@ -312,7 +327,7 @@ end
     es = [UndirectedEdge(1, 2), UndirectedEdge(2, 3)]
     G = _random_unitary_gate(P; seed = 10)
     ρ, msgs = _fresh_random(es, P, V; seed = 25)
-    _, _, info = apply!(ρ, msgs, SandwichGate(LocalGate((1, 2), G)); trunc = truncrank(3))
+    _, _, info = apply!(ρ, msgs, LocalGate((1, 2), G); action = SandwichAction, trunc = truncrank(3))
     @test dim(virtualspace(ρ, DirectedEdge(1, 2))) == 3
     @test info.ϵ > 0
     @test check_consistency(ρ)
@@ -322,39 +337,43 @@ end
     ρ2, msgs2 = _fresh_random(es, P, V; seed = 25)
     ref = _dense(ρ2)
     Gweak = _random_unitary_gate(P; seed = 10, τ = 1.0e-6)
-    apply!(ρ2, msgs2, SandwichGate(LocalGate((1, 2), Gweak)); trunc = truncrank(16))
+    apply!(ρ2, msgs2, LocalGate((1, 2), Gweak); action = SandwichAction, trunc = truncrank(16))
     @test _dense(ρ2) / norm(_dense(ρ2)) ≈ ref / norm(ref) rtol = 1e-4
 end
 
 # --- composition with aggregates and Trotter --------------------------------
 
-@testset "Sided gates compose through CompositeGate and Circuit" begin
+@testset "The action threads through CompositeGate and Circuit" begin
     P = ComplexSpace(2)
     es = [UndirectedEdge(1, 2), UndirectedEdge(3, 4)]
     ρ, msgs = _fresh(es, P)
     G = _random_unitary_gate(P; seed = 11)
-    layer = CompositeGate([SandwichGate(LocalGate((1, 2), G)), SandwichGate(LocalGate((3, 4), G))])
-    _, _, info = apply!(ρ, msgs, layer; trunc = notrunc(), normp = 0)
+    layer = CompositeGate([LocalGate((1, 2), G), LocalGate((3, 4), G)])
+    _, _, info = apply!(ρ, msgs, layer; action = SandwichAction, trunc = notrunc(), normp = 0)
     @test check_consistency(ρ)
     @test isfinite(info.logλ)
 
-    # wrapping distributes over the aggregate, so a Trotter circuit is reusable verbatim.
+    # the keyword reaches every gate in an aggregate, so a Trotter circuit is reusable verbatim.
     # `trotterize` takes an `AbstractDict`, which `Dictionaries.Dictionary` is not.
     bond_hams = Dict(e => _random_hermitian(P ⊗ P; seed = 12) for e in es)
     circuit = trotterize(bond_hams, 0.01, Strang())
-    sandwiched = SandwichGate(circuit)
-    @test sandwiched isa Circuit
     ρ2, msgs2 = _fresh(es, P)
-    apply!(ρ2, msgs2, sandwiched; trunc = notrunc(), normp = 0)
+    apply!(ρ2, msgs2, circuit; action = SandwichAction, trunc = notrunc(), normp = 0)
     @test check_consistency(ρ2)
     @test isvectorized(ρ2)
+
+    # ... and a one-sided action on the same circuit halves the physical legs it touches
+    ρ3, msgs3 = _fresh(es, P)
+    apply!(ρ3, msgs3, circuit; action = LeftAction, trunc = notrunc(), normp = 0)
+    @test check_consistency(ρ3)
+    @test isvectorized(ρ3)                          # G is square, so Gρ stays square
 end
 
 # --- imaginary-time evolution -------------------------------------------------
 
 @testset "Imaginary-time evolution of 𝟙 reproduces exp(-βH)" begin
     # The physical end-to-end test, and the one that pins down the β bookkeeping: a
-    # `SandwichGate` applies exp(-dτ H) on *both* sides, so a step of size dτ advances β by 2dτ.
+    # `SandwichAction` applies exp(-dτ H) on *both* sides, so a step of size dτ advances β by 2dτ.
     P = ComplexSpace(2)
     n = 3
     es = [UndirectedEdge(1, 2), UndirectedEdge(2, 3)]
@@ -372,10 +391,10 @@ end
     β = 2 * dτ * nsteps                    # two-sided: each step advances β by 2dτ
     # explicit coloring: `Dict` key order is hash-seed-dependent, and so would the Trotter
     # layer order be
-    circuit = SandwichGate(trotterize(bond_hams, dτ, Strang([[es[1]], [es[2]]])))
+    circuit = trotterize(bond_hams, dτ, Strang([[es[1]], [es[2]]]))
     ρ, msgs = _fresh(es, P)
     for _ in 1:nsteps
-        apply!(ρ, msgs, circuit; trunc = truncrank(16), normp = 0)
+        apply!(ρ, msgs, circuit; action = SandwichAction, trunc = truncrank(16), normp = 0)
     end
 
     exact = exp(-β * H)

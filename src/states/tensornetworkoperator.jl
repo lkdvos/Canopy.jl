@@ -59,7 +59,7 @@ Allocate an uninitialized [`TensorNetworkOperator`](@ref) from per-vertex physic
 
 `pspaces[v]` gives the *ket* space `P_v`; the codomain of the on-site tensor is
 `P_v ⊗ dual(P_v)`, so operators built this way are square. The type itself allows
-`P_out ≠ P_in`, which a one-site [`LeftGate`](@ref) can produce.
+`P_out ≠ P_in`, which a one-site rectangular gate under [`LeftAction`](@ref) can produce.
 
 Everything else matches the [`TensorNetworkState`](@ref) constructor: the adjacency is
 inferred from the edge keys, `keys(pspaces)` must match the resulting vertex set,
@@ -171,7 +171,7 @@ constructor) or uniformly as `P` and `V` over a `topology`.
 
 The result is a generic two-physical-leg network: it is neither Hermitian nor positive,
 and its trace is not normalized. For a physically meaningful density matrix start from
-[`identity_operator`](@ref) and evolve it with [`SandwichGate`](@ref).
+[`identity_operator`](@ref) and evolve it under a [`SandwichAction`](@ref).
 
 Unlike [`randn_state`](@ref) there is no `total_charge` keyword — the operator analogue of
 a charge bath is a charge-*shifting* operator, which needs its own semantics.
@@ -268,10 +268,10 @@ Adapt.adapt_structure(to, op::TensorNetworkOperator) =
 Return `true` if every on-site tensor has `physicalspace(op, v, 2) == dual(physicalspace(op, v, 1))`,
 i.e. if `op` is the vectorization of a *square* linear map.
 
-This is the precondition for two-sided gate application ([`SandwichGate`](@ref)): only
+This is the precondition for two-sided gate application ([`SandwichAction`](@ref)): only
 then do the left action on slot 1 and the right action on slot 2 both typecheck. A network
 that fails this is a perfectly good purification — one physical leg and one ancilla — and
-supports [`LeftGate`](@ref) freely; it just has no `ρ ↦ GρG†`.
+supports [`LeftAction`](@ref) freely; it just has no `ρ ↦ GρG†`.
 """
 isvectorized(op::TensorNetworkOperator) =
     all(v -> physicalspace(op, v, 2) == dual(physicalspace(op, v, 1)), vertices(op))

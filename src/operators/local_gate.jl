@@ -26,7 +26,7 @@ Adapt.adapt_structure(to, g::LocalGate) = LocalGate(g.sites, adapt(to, g.tensor)
 
 # Structural checks against the network: sites exist, the gate's spaces match the physical
 # spaces at those sites, and (for two-site gates) the sites form an existing edge. The
-# side-dependent variants for operators are in `operators/sided_gate.jl`.
+# action-dependent variants for operators are in `operators/gate_action.jl`.
 
 # Physical slot `slot` of `net[site]` against the gate space `Pgate` at gate slot `i`. Slot 1
 # (the ket) pairs with the gate space directly; slot 2 (the bra) carries `dual`, which is what
@@ -61,7 +61,7 @@ end
 
 @doc """
     apply!(state::TensorNetworkState, msgs, gate::LocalGate; kwargs...) -> state, msgs, info
-    apply!(op::TensorNetworkOperator, msgs, gate::Union{LeftGate, RightGate, SandwichGate}; kwargs...)
+    apply!(op::TensorNetworkOperator, msgs, gate::LocalGate; action = SandwichAction, kwargs...)
 
 In-place application of `gate` onto `state`. Returns `info = (; ϵ, logλ)`:
 `ϵ` is the truncation error and `logλ` is the log of the bond-message norm
@@ -76,17 +76,18 @@ its pseudo-inverse clips message eigenvalues at or below `gauge_tol::Real`
 directions that would otherwise be inverted and blow up the gauge. Pass
 `gauge_tol = 0` to disable clipping.
 
-On a `TensorNetworkOperator` a bare `LocalGate` has no method: wrap it in
-[`LeftGate`](@ref), [`RightGate`](@ref) or [`SandwichGate`](@ref) to say which physical
-leg(s) it acts on. There is deliberately no default side. Everything above applies
-unchanged to the wrapped forms.
+On a `TensorNetworkOperator` the extra keyword `action::`[`GateAction`](@ref) says which
+physical leg(s) the gate acts on — [`LeftAction`](@ref) (`ρ ↦ Gρ`), [`RightAction`](@ref)
+(`ρ ↦ ρG`) or the default [`SandwichAction`](@ref) (`ρ ↦ GρG†`). Everything above applies
+unchanged to all three. On a state the keyword is an error: there is only one physical leg.
 """ apply!
 
 # --- single-site -------------------------------------------------------------
 function apply!(
         state::TensorNetworkState, msgs::BPMessages, gate::LocalGate{<:Any, 1};
-        timer = nothing, kwargs...,
+        timer = nothing, action = nothing, kwargs...,
     )
+    _check_no_action(action)
     return @maybe_timeit timer "apply! 1-site" begin
         _check_compatible(state, gate)
         v = only(gate.sites)

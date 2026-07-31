@@ -4,8 +4,8 @@
 A set of (commuting) gates acting on non-overlapping sites. Groups gates that
 can be applied in any order (or in parallel).
 
-The element type is any [`AbstractGate`](@ref), so a layer of sided gates
-([`SandwichGate`](@ref) and friends) is a `CompositeGate` like any other.
+The element type is any [`AbstractGate`](@ref). Keyword arguments of [`apply!`](@ref) —
+including the [`GateAction`](@ref) on an operator — are forwarded to every gate in the list.
 """
 struct CompositeGate{T <: Number, S <: ElementarySpace, V, G <: AbstractGate{T, S, V}} <: AbstractGate{T, S, V}
     gatelist::Vector{G}
@@ -54,6 +54,9 @@ end
 
 Ordered sequence of gates applied in turn by [`apply!`](@ref). Pure operator
 content — does not include BP reconvergence.
+
+As for [`CompositeGate`](@ref), [`apply!`](@ref) forwards its keyword arguments to every gate,
+so the same circuit is reusable under any [`GateAction`](@ref).
 """
 struct Circuit{T <: Number, S <: ElementarySpace, V, G <: AbstractGate{T, S, V}}
     gatelist::Vector{G}

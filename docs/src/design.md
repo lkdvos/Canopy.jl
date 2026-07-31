@@ -194,10 +194,14 @@ algorithm.
 
 ### Gate application
 
-The only genuinely new machinery. `LeftGate`, `RightGate` and `SandwichGate` record which
-physical slots a gate acts on; `_acted_slots` is the single parameter the two-site kernel needs.
+The only genuinely new machinery. The `GateAction` enum — `LeftAction`, `RightAction`,
+`SandwichAction`, passed as the `action` keyword of `apply!` and defaulting to the two-sided one
+— records which physical slots a gate acts on; those slots are the single parameter the two-site
+kernel needs. The action is union-split by hand into three calls, each passing a literal slot
+tuple and its own `θ` contraction as a `do` block, so the kernel's leg bookkeeping — all of it
+derived from `length(acted)` — infers as if the action were static.
 Legs the gate does not touch stay in the QR environment, so a one-sided operator gate costs
-exactly what the same gate costs on a state — only `SandwichGate` pays `d²`.
+exactly what the same gate costs on a state — only `SandwichAction` pays `d²`.
 
 The duality convention removes all transposes: a dual codomain leg contracts directly against a
 non-dual gate leg, so right-multiplication just consumes the gate's *codomain* instead of its

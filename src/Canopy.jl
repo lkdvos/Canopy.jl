@@ -68,9 +68,9 @@ export LocalGate, apply!
 include("operators/composite_gate.jl")
 export CompositeGate, Circuit
 
-# `simple_update.jl` dispatches on `SidedGate`, so the gate types come first
-include("operators/sided_gate.jl")
-export LeftGate, RightGate, SandwichGate
+# `simple_update.jl`'s kernel dispatches on the gate action, so the enum comes first
+include("operators/gate_action.jl")
+export GateAction, LeftAction, RightAction, SandwichAction
 
 include("simple_update.jl")
 
