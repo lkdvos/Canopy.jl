@@ -2,8 +2,7 @@ using Canopy
 using Canopy: DirectedEdge, belief_propagation, check_consistency, tr_distance
 using Canopy: SynchronousSchedule, SpanningTreeSchedule, ResidualSchedule, ResidualSplashSchedule,
               GreedySampler, WeightedSampler
-using Canopy: random_bfs_order, recompute_message, update_messages_at!, project_hermitian!,
-              outgoing_edges
+using Canopy: random_bfs_order, recompute_message, update_messages_at!, project_hermitian!
 using TensorKit
 using TensorKit.TO: DefaultAllocator, DefaultBackend
 using TensorKitTensors.FermionOperators: fermion_space
