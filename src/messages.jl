@@ -258,7 +258,7 @@ listed in `edges` — including padded unit-space legs — pass through
 unchanged.
 """
 function attach_messages(
-        state::TensorNetworkState, msgs::BPMessages, site, edges,
+        state::AbstractTensorNetwork, msgs::BPMessages, site, edges,
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
     leg_factors = map(edges) do e
@@ -276,7 +276,7 @@ BP message at `site` into the corresponding virtual leg of `state[site]`.
 Equivalent to `attach_messages(state, msgs, site, incoming_edges(state, site))`.
 """
 attach_all_messages(
-    state::TensorNetworkState, msgs::BPMessages, site,
+    state::AbstractTensorNetwork, msgs::BPMessages, site,
     backend = DefaultBackend(), allocator = default_allocator(state),
 ) = attach_messages(state, msgs, site, incoming_edges(state, site), backend, allocator)
 

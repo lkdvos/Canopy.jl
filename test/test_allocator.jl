@@ -77,15 +77,15 @@ end
 
 # The operator path adds a second physical leg to every tensor, so `_absorb_legs`' bump
 # allocation and the `θ` contraction see different shapes; `SandwichAction` in particular puts
-# two physical legs in the `R` factor. Pin the same equivalence there. Bosonic only — gate
-# application on an operator refuses fermionic sectors for now.
+# two physical legs in the `R` factor. Pin the same equivalence there, on the fermionic row too:
+# with `np = 2` the unacted physical leg rides in the QR codomain, a shape the state path never
+# produces.
 _operator_on(g, P, V; seed) = (
     Random.seed!(seed); o = randn_operator(ComplexF64, g, P, V); (o, BPMessages(o))
 )
 
-@testset "apply! 2-site operator: Bumper ≡ default ($action)" for
-        action in (LeftAction, RightAction, SandwichAction)
-    P, V = ComplexSpace(2), ComplexSpace(4)
+@testset "apply! 2-site operator: Bumper ≡ default ($sname, $action)" for
+        (sname, P, V) in _SPACES, action in (LeftAction, RightAction, SandwichAction)
     g = grid([2, 3])
     e = first(edges(g))
     u, v = src(e), dst(e)

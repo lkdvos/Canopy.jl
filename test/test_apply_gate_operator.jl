@@ -4,7 +4,7 @@ using Canopy: TensorNetworkOperator, TensorNetworkState, BPMessages, UndirectedE
               identity_operator, randn_operator, isvectorized, check_consistency,
               physicalspace, physicalspaces, virtualspace, degree, apply!, belief_propagation
 using TensorKit
-using TensorKitTensors.FermionOperators: fermion_space
+using TensorKitTensors.FermionOperators: fermion_space, f_num, f_hopping
 using MatrixAlgebraKit: truncrank, trunctol, notrunc
 using Graphs: path_graph, cycle_graph, star_graph, complete_graph, grid, edges, src, dst
 using Dictionaries
@@ -56,8 +56,6 @@ function _fresh_random(topology, P, V; seed = 0)
     return ρ, BPMessages(ρ)
 end
 
-# Gate application is not yet validated for fermionic braiding, so the sweep is bosonic.
-#
 # Geometries for the dense-reference sweep: tree → single loop → multi-loop, with degree 1
 # (padded trailing legs), degree 3 and degree 4 all represented. Deliberately capped at 5
 # vertices: a dense *operator* costs `dim(P)^(2n)`, so the 3×3 periodic grid used by the state
@@ -69,25 +67,22 @@ const _OP_GEOMETRIES = [
     ("cycle-4", cycle_graph(4)),
     ("K4", complete_graph(4)),
 ]
+#
+# The two fermionic rows are what validate the operator path's braiding: relative to the state
+# kernel it adds the second codomain leg crossing the QR/SVD partition and, under a right or
+# sandwich action, a gate contracted against a *dual* codomain leg. Both are covered here on
+# every geometry, which is the evidence that neither needs a compensating `twist!`.
 const _OP_GATE_SPACES = [
     ("bosonic", ComplexSpace(2), ComplexSpace(2)),
     ("U1", Vect[U1Irrep](0 => 1, 1 => 1), Vect[U1Irrep](-1 => 1, 0 => 1, 1 => 1)),
+    ("fermionic", fermion_space(Trivial), Vect[fℤ₂](0 => 1, 1 => 1)),
+    (
+        "fermionic-U1", fermion_space(U1Irrep),
+        Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => 1, (1, 1) => 1, (1, -1) => 1),
+    ),
 ]
 
 # --- refusals -----------------------------------------------------------------
-
-@testset "Fermionic gate application on an operator is refused, not silently wrong" begin
-    P = fermion_space(Trivial)
-    es = [UndirectedEdge(1, 2), UndirectedEdge(2, 3)]
-    ρ, msgs = _fresh(es, P)
-    g = id(P)
-    G = id(P ⊗ P)
-    @test_throws ArgumentError apply!(ρ, msgs, LocalGate((1,), g); action = SandwichAction)
-    @test_throws ArgumentError apply!(ρ, msgs, LocalGate((1, 2), G); action = LeftAction)
-    # a state on the same space still works — the guard is operator-only
-    ψ = randn_state(ComplexF64, es, P, Vect[fℤ₂](0 => 1, 1 => 1))
-    @test apply!(ψ, BPMessages(ψ), LocalGate((1,), g)) isa Tuple
-end
 
 @testset "SandwichAction requires a vectorized operator" begin
     P, V = ComplexSpace(2), ComplexSpace(2)
@@ -260,8 +255,8 @@ end
     @test _dense(ρa) ≈ _dense(ρb) rtol = 1e-10
 end
 
-@testset "SandwichAction preserves hermiticity and trace — $gname" for (gname, g) in _OP_GEOMETRIES
-    P, V = ComplexSpace(2), ComplexSpace(2)
+@testset "SandwichAction preserves hermiticity and trace — $sname / $gname" for
+        (sname, P, _) in _OP_GATE_SPACES, (gname, g) in _OP_GEOMETRIES
     # Starting from 𝟙, `ρ ↦ GρG†` must stay Hermitian for *any* G, and preserve the trace when
     # G is unitary. A missing conjugation or transpose on the bra side breaks this immediately,
     # with no dense gate reference needed.
@@ -400,4 +395,47 @@ end
     exact = exp(-β * H)
     got = _dense(ρ)
     @test got / tr(got) ≈ exact / tr(exact) rtol = 1e-4
+end
+
+@testset "Imaginary-time evolution of 𝟙 reproduces exp(-βH) for interacting fermions — $sname" for
+        (sname, symm) in (("fℤ₂", Trivial), ("fℤ₂⊠U1", U1Irrep))
+    # The fermionic counterpart of the test above, on a *interacting* model (spinless t–V), so
+    # that it does not reduce to a free-fermion identity: `exp(-βH)` here is a genuine
+    # exact-diagonalization reference and every braiding sign in the sandwich path has to be
+    # right for the comparison to hold.
+    P = fermion_space(symm)
+    n = 3
+    es = [UndirectedEdge(1, 2), UndirectedEdge(2, 3)]
+    hop = f_hopping(ComplexF64, symm)
+    nop = f_num(ComplexF64, symm)
+    t, Vint, μ = 1.0, 1.5, 0.4
+    deg(v) = v == 2 ? 2 : 1
+    h(u, v) = -t * hop + Vint * (nop ⊗ nop) -
+        (μ / deg(u)) * (nop ⊗ id(P)) - (μ / deg(v)) * (id(P) ⊗ nop)
+    bond_hams = Dict(e => h(first(e), last(e)) for e in es)
+
+    H = sum(_embed(bond_hams[e], n, (first(e), last(e)), fill(P, n)) for e in es)
+
+    dτ = 0.005
+    nsteps = 20
+    β = 2 * dτ * nsteps                    # two-sided: each step advances β by 2dτ
+    circuit = trotterize(bond_hams, dτ, Strang([[es[1]], [es[2]]]))
+    ρ, msgs = _fresh(es, P)
+    for _ in 1:nsteps
+        apply!(ρ, msgs, circuit; action = SandwichAction, trunc = truncrank(16), normp = 0)
+    end
+
+    exact = exp(-β * H)
+    got = _dense(ρ)
+    @test got ≈ got' rtol = 1e-10
+    @test got / tr(got) ≈ exact / tr(exact) rtol = 1e-4
+
+    # The same ensemble reached one-sided: `LeftAction` for `2·nsteps` steps builds
+    # `exp(-2·nsteps·dτ·H) = exp(-βH)` directly, with no bra-side gate at all.
+    ρ1, msgs1 = _fresh(es, P)
+    for _ in 1:(2 * nsteps)
+        apply!(ρ1, msgs1, circuit; action = LeftAction, trunc = truncrank(16), normp = 0)
+    end
+    got1 = _dense(ρ1)
+    @test got1 / tr(got1) ≈ exact / tr(exact) rtol = 1e-4
 end

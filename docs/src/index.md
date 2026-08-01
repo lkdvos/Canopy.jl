@@ -17,6 +17,6 @@ Pkg.add(url = "https://github.com/lkdvos/Canopy.jl")
 ## Contents
 
 ```@contents
-Pages = ["design.md", "states.md", "examples/index.md"]
+Pages = ["design.md", "states.md", "operators.md", "fermions.md", "examples/index.md"]
 Depth = 2
 ```

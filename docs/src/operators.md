@@ -151,20 +151,60 @@ right and the only free choice, and it has one consequence that is very easy to 
   it **one-sided**. Then `⟨O⟩ = tr(X†OX) / tr(X†X)` is the thermal average at `β`, and it is
   computable with the existing double-layer machinery — `X` is exactly a purification.
 
-A true `trace(ρ)` is *not* provided. Closing slot 1 against slot 2 at every vertex leaves a
-**single-layer** network, whose Bethe approximation needs vector-valued messages and a
-different fixed-point iteration. That is a new algorithm, not a missing accessor.
+## Measuring: `expect` on an operator
 
-## Fermions are not yet supported
+[`reduced_density_matrix`](@ref) and [`expect`](@ref) take either network. On an operator they
+read it as a **purification** — slot 1 physical, slot 2 ancilla — and return the marginal of
 
-Gate application on a `TensorNetworkOperator` throws for fermionic sectortypes rather than
-returning silently wrong signs. The operator path adds braid sites the state analysis in
-[Fermionic correctness](@ref) does not cover: the extra codomain leg is re-partitioned by the
-QR/SVD, and it is contracted against a gate on the bra side. Bosonic and bosonic-graded
-sectors (`Trivial`, `U₁`, `SU₂`, …) are supported.
+```math
+X X^\dagger / \operatorname{tr} X X^\dagger
+```
 
-The operator *type*, its constructors and the fused view are fermion-safe — only `apply!` is
-gated.
+on the requested sites, so `⟨O⟩ = tr(O · XX†) / tr(XX†)`. This is precisely the double-layer
+object belief propagation already converges the environment of, which is why it needs no new
+algorithm.
+
+```julia
+ρ = identity_operator(ComplexF64, es, P)          # β = 0
+msgs = BPMessages(ρ)
+for _ in 1:nsteps
+    apply!(ρ, msgs, circuit; action = LeftAction, trunc)   # X = exp(-nsteps·dτ·H)
+    msgs = belief_propagation(msgs, ρ; maxiter = 200)
+end
+n̄ = expect(ρ, msgs, f_num(ComplexF64, Trivial), v)          # thermal average at β = 2·nsteps·dτ
+```
+
+Read the exponent off the table rather than from memory — this is the factor of two again, and
+`expect` measures `XX†`, not `X`:
+
+| Evolution of `𝟙` | Network holds | `expect` measures | with |
+|---|---|---|---|
+| one-sided, `n` steps of `dτ` | `X = exp(-τH)`, `τ = n·dτ` | `exp(-2τH)` | `β = 2n·dτ` |
+| two-sided, `n` steps of `dτ` | `ρ = exp(-2τH)` | `exp(-4τH)` | `β = 4n·dτ` |
+
+So one-sided at `dτ` and two-sided at `dτ/2` reach the same ensemble in the same number of
+steps, at half the cost per step — the one-sided route is the one to prefer.
+
+A true `trace(ρ)`, and with it the single-layer `tr(ρO)/tr(ρ)`, is *not* provided. Closing slot 1
+against slot 2 at every vertex leaves a **single-layer** network, whose Bethe approximation needs
+vector-valued messages and a different fixed-point iteration. That is a new algorithm, not a
+missing accessor.
+
+## Fermions
+
+Fermionic sectortypes are supported throughout, with no fermion-specific code path: the same
+`apply!` runs for `Trivial`, `U₁`, `SU₂`, `fℤ₂` and `fℤ₂ ⊠ U₁`, and the signs fall out of the
+duality convention plus TensorKit's automatic braiding.
+
+The operator path does add two braid sites the state analysis does not have — the second
+codomain leg crossing the QR/SVD partition, and a gate contracted against a *dual* codomain leg
+on the bra side — but neither needs a compensating `twist!`. See
+[The operator path](@ref) in [Fermionic correctness](@ref) for why, and
+`test/test_apply_gate_operator.jl` for the dense-equivalence sweep that holds it in place.
+
+Measuring does need one thing: tracing out the ancilla leg is a fermionic *partial trace*, so
+`reduced_density_matrix` twists **every** physical ket leg, not only the open one. Without it the
+result is not a positive matrix — see the same section.
 
 ## Operator API reference
 
@@ -181,4 +221,11 @@ GateAction
 LeftAction
 RightAction
 SandwichAction
+AbstractGate
+apply!
+Canopy.default_gauge_tol
+CompositeGate
+Circuit
+reduced_density_matrix
+expect
 ```

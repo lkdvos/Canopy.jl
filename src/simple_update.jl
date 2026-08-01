@@ -27,7 +27,6 @@ function apply!(
         op::TensorNetworkOperator, msgs::BPMessages, gate::LocalGate{<:Any, 2};
         action::GateAction = SandwichAction, kwargs...,
     )
-    _check_bosonic(op)
     _check_compatible(op, gate, action)
     return _apply_2site!(op, msgs, gate, action; kwargs...)
 end
@@ -159,7 +158,7 @@ end
 """
     default_gauge_tol(x) -> Real
 
-Default eigenvalue floor for the gauge pseudo-inverse in [`_eigh_sqrt`](@ref),
+Default eigenvalue floor for the gauge pseudo-inverse in `_eigh_sqrt`,
 derived from the scalar type of `x` (a state, messages, or tensor). BP messages
 are normalized, so an absolute floor at `eps^(3/4)` cleanly separates the
 numerical-noise eigenvalues — which must *not* be inverted, or the gauge blows

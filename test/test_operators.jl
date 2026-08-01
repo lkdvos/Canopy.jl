@@ -7,13 +7,12 @@ using TensorKit
 using TensorKitTensors.FermionOperators: fermion_space
 using Graphs: path_graph, cycle_graph, star_graph, grid, edges
 using Dictionaries
-using MatrixAlgebraKit: eigh_vals
 using Random
 using Test
 
-# The three sectortypes the operator path is expected to work on, plus `fℤ₂` — gate
-# application refuses fermions for now, but the *data layout* the fused view depends on is
-# sign-agnostic, so it is checked here too.
+# The four sectortypes the operator path is expected to work on. The `fℤ₂` row matters most
+# here: the *data layout* the fused view depends on has to be sign-agnostic, and this is where
+# that is pinned down.
 const _OP_SPACES = [
     ("trivial", ComplexSpace(2), ComplexSpace(3)),
     ("U1", Vect[U1Irrep](0 => 1, 1 => 2), Vect[U1Irrep](-1 => 1, 0 => 2, 1 => 1)),
@@ -178,10 +177,11 @@ end
     ρ = reduced_density_matrix((verts[vidx],), view, msgs)
     @test tr(ρ) ≈ 1
     @test ρ ≈ ρ'
-    # `isposdef` is not usable here: the contraction leaves `ρ` Hermitian only to ~1e-16, and
-    # `isposdef` demands exact hermiticity (this is equally true of the state path). Check the
-    # physically meaningful statement instead.
-    @test all(>(0), eigh_vals((ρ + ρ') / 2))
+    # `isposdef` cannot be applied directly: the contraction leaves `ρ` Hermitian only to ~1e-16,
+    # and `isposdef` demands exact hermiticity (this is equally true of the state path). The
+    # hermiticity is checked approximately just above; project onto the Hermitian part — which is
+    # Hermitian bit-for-bit — and let `isposdef` judge that.
+    @test isposdef((ρ + ρ') / 2)
     # the fused single-site RDM lives on the doubled physical space
     @test space(ρ) == (fuse(P ⊗ dual(P)) ← fuse(P ⊗ dual(P)))
 

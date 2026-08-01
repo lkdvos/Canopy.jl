@@ -205,17 +205,23 @@ exactly what the same gate costs on a state — only `SandwichAction` pays `d²`
 
 The duality convention removes all transposes: a dual codomain leg contracts directly against a
 non-dual gate leg, so right-multiplication just consumes the gate's *codomain* instead of its
-domain.
+domain. That same convention is what makes the operator path fermion-correct with no extra
+`twist!`: see [Fermionic correctness](@ref).
+
+### Measuring a density matrix
+
+`reduced_density_matrix` and `expect` accept either network. On an operator they read it as a
+purification — slot 1 physical, slot 2 ancilla — and return the marginal of `X X† / tr(X X†)`,
+which is the object belief propagation already converges the environment of. The state and
+operator contractions are one pair of methods parameterized by `num_physical`: the operator
+simply closes its second physical leg against its own adjoint inside the same `ncon`.
 
 ## Open questions / future work
 
-- **Fermionic operator networks.** `apply!` on a `TensorNetworkOperator` throws for fermionic
-  sectortypes. The operator path adds braid sites the state analysis does not cover — the extra
-  codomain leg crossing the QR/SVD partition, and the bra-side gate contraction — and the open
-  question is whether right-multiplication on a dual codomain leg needs a compensating `twist!`.
-  The type, its constructors and the fused view are already fermion-safe.
-- **Single-layer BP** for a true `trace(ρ)` and for operator expectation values
-  `tr(ρO)/tr(ρ)`: vector-valued messages and a separate fixed-point iteration.
+- **Single-layer BP** for a true `trace(ρ)` and for the single-layer operator expectation value
+  `tr(ρO)/tr(ρ)`: vector-valued messages and a separate fixed-point iteration. The *double*-layer
+  observable `tr(O·XX†)/tr(XX†)` — the thermal average when `X = exp(-βH/2)` — is already
+  available as `expect(op, msgs, O, sites)`.
 - **`product_operator`** with per-site local operators, and `|ψ⟩⟨ψ|` from a state (needs `A ⊗ Ā`
   with fused bonds, i.e. `χ²`).
 - **Message bond dimensions** independent of state bond dimensions (for loop-corrected BP, boundary-MPS environments). The current shape supports this — `BPMessages` is parameterized independently — but the constructor and `check_consistency` check will need refinement.

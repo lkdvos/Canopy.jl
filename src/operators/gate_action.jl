@@ -131,20 +131,16 @@ function _check_compatible(op::TensorNetworkOperator, gate::LocalGate, action::G
     return nothing
 end
 
-# --- fermionic guard ----------------------------------------------------------
-# The fermionic sign structure of the operator path has not been worked through: the extra
-# codomain leg is re-partitioned by the QR/SVD and contracted against a gate on the bra
-# side, both new braid sites relative to the state kernel documented in
-# `docs/src/fermions.md`. Refuse rather than return silently wrong signs.
-function _check_bosonic(op::TensorNetworkOperator)
-    I = sectortype(spacetype(op))
-    BraidingStyle(I) isa Fermionic && throw(
-        ArgumentError(
-            lazy"gate application on a TensorNetworkOperator is not yet implemented for fermionic sectors (got $I): the operator path's braiding signs have not been validated. Bosonic and bosonic-graded sectors are supported."
-        )
-    )
-    return nothing
-end
+# --- fermions -----------------------------------------------------------------
+# The operator path needs no fermion-specific code. Its two extra braid sites relative to the
+# state kernel — the second codomain leg crossing the QR/SVD partition, and the bra-side gate
+# contraction — are both handled by TensorKit's automatic braiding, because every leg move here
+# goes through `permute`/`repartition`/`tensorcontract!` rather than through the space-preserving
+# `_mul_leg!` fast path (which carries its own twist). In particular right-multiplication on a
+# dual codomain leg needs *no* compensating `twist!`: the dual leg is exactly what supplies the
+# transpose, and the braiding that comes with it is the one the contraction already asks for.
+# `test/test_apply_gate_operator.jl` runs the dense-equivalence sweep on `fℤ₂` and `fℤ₂ ⊠ U(1)`
+# to keep this honest; see `docs/src/fermions.md`.
 
 # --- single-site --------------------------------------------------------------
 function apply!(
@@ -153,7 +149,6 @@ function apply!(
         timer = nothing, backend = DefaultBackend(), allocator = default_allocator(op), kwargs...,
     )
     return @maybe_timeit timer "apply! 1-site operator" begin
-        _check_bosonic(op)
         _check_compatible(op, gate, action)
         v = only(sites(gate))
         t = op[v]
