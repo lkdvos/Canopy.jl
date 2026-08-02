@@ -74,15 +74,25 @@ All files below: host `ccqlin038.flatironinstitute.org`, CPU `cascadelake`
 (32 logical CPUs), julia 1.12.6, `JULIA_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`,
 default `SUITE` (no `CANOPY_BENCH_FULL`), 93 keys.
 
-| file | code state | notes |
+> **The `.json` result files are not tracked** (`benchmark/.gitignore`). They are
+> multi-megabyte, host-specific timing blobs that reproduce on no other machine,
+> and a pass/fail comparison is only valid between two interleaved runs on the
+> *same* box anyway (see above). Recreate them locally with the recipe above.
+> `params.json` **is** tracked, because `loadparams!` needs it for a comparison
+> to mean anything.
+
+The pair the committed noise floor in `benchmark/reports/noise_floor.md` was
+derived from:
+
+| label | code state | notes |
 |---|---|---|
-| `noise1_e79a384_t1.json` | phase-0 harness on `symmetry-kernel`; `src/` byte-identical to `main` (`e79a384`) | run 1 of the noise-floor pair |
-| `noise2_e79a384_t1.json` | identical — same commit, same `params.json`, taken immediately after run 1 | run 2 of the noise-floor pair |
+| `noise1_e79a384_t1` | phase-0 harness; `src/` byte-identical to `main` (`e79a384`) | run 1 of the noise-floor pair |
+| `noise2_e79a384_t1` | identical — same commit, same `params.json`, taken immediately after run 1 | run 2 of the noise-floor pair |
 
 Note the `_e79a384_` in both names is `main`'s sha, and that is the point: phase 0
 adds no `src/` diff, so both runs execute exactly the code `main` executes.
 
-### ⚠ Both files predate the `:fz2_u1_flat` addition — expect missing keys, not regressions
+### ⚠ That pair predates the `:fz2_u1_flat` addition — expect missing keys, not regressions
 
 `noise1` / `noise2` were recorded when `BENCH_SPACES` held four symmetries. The
 phase-0 addendum promoted `:fz2_u1_flat` from census-only into `BENCH_SPACES`, so
