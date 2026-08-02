@@ -318,6 +318,86 @@ end
     end
 end
 
+# --- automatic selection -------------------------------------------------------
+#
+# The vertex-batched kernel picks its own formulation when the backend is an
+# ordinary one (`DefaultBackend()`, and whatever else reaches it): blocked when
+# `uses_blocked_kernel` holds, pairwise otherwise. The two selector backends
+# override it.
+#
+# Testing this by comparing *results* would be worthless twice over. The two
+# kernels are supposed to agree, so agreement proves nothing about which ran; and
+# on these fixtures they frequently agree **bitwise**, so not even `===` on the
+# output data discriminates. What does discriminate is the sequence of
+# temporaries: the pairwise chain repartitions the on-site tensor and closes with
+# a `tensorcontract!` that needs a `copyC` buffer for the `((2,),(1,))`
+# repartition of `out`, while the blocked chain transposes the (χ²) message and
+# closes straight into `out` with `mul!`. Logging every `TO.tensoralloc` through a
+# custom allocator therefore fingerprints the path — measured: 20 vs 24
+# allocations at a degree-4 `fℤ₂ ⊠ U1Irrep` vertex, 2 vs 3 at a leaf.
+#
+# `fp_blocked != fp_pairwise` is asserted alongside, so the fingerprint is proved
+# to discriminate at each fixture rather than assumed to; without it a degenerate
+# fingerprint would make the selection assertion vacuously true.
+mutable struct LoggingAllocator
+    log::Vector{Any}
+end
+LoggingAllocator() = LoggingAllocator(Any[])
+
+function TensorKit.TO.tensoralloc(
+        ::Type{A}, structure, v::Val{istemp}, a::LoggingAllocator
+    ) where {A <: AbstractArray, istemp}
+    push!(a.log, (A, structure, istemp))
+    return TensorKit.TO.tensoralloc(A, structure, v)
+end
+
+function _path_fingerprint(msgs, state, edges, backend)
+    a = LoggingAllocator()
+    out = map(e -> similar(msgs[e]), edges)
+    compute_message!(out, msgs, state, edges, backend, a)
+    return a.log
+end
+
+@testset "DefaultBackend selects the blocked kernel" begin
+    # The expected verdict is spelled out per fixture rather than derived from
+    # `_expect_blocked` (which only excludes `Trivial`): `SU2Irrep` is the
+    # non-abelian exclusion, and hard-coding `false` here is the point of the row.
+    fixtures = (
+        map(r -> (r[1], r[2], r[3], _expect_blocked(r[2])), _MSG_SPACES)...,
+        (
+            "SU(2)", Vect[SU2Irrep](0 => 1, 1 // 2 => 1),
+            Vect[SU2Irrep](0 => 2, 1 // 2 => 1), false,
+        ),
+    )
+    g = star_graph(5)     # degree 4 at the centre, degree 1 at the leaves
+    for (sname, P, V, expected) in fixtures
+        @testset "$sname" begin
+            state = _state_on(g, P, V; seed = hash((sname, "sel")))
+            msgs = BPMessages(state)
+            Random.seed!(hash((sname, "selmsg")))
+            for e in keys(msgs.messages)
+                Random.randn!(msgs.messages[e])
+            end
+            for v in vertices(state)
+                blocked = Canopy.uses_blocked_kernel(state[v])
+                @test blocked == expected
+                edges = collect(outgoing_edges(state, v))
+                fp_default = _path_fingerprint(msgs, state, edges, DefaultBackend())
+                fp_blocked = _path_fingerprint(msgs, state, edges, BlockedBackend())
+                fp_pairwise = _path_fingerprint(msgs, state, edges, PairwiseBackend())
+                if blocked
+                    @test fp_blocked != fp_pairwise      # the fingerprint discriminates
+                    @test fp_default == fp_blocked       # …and the default took the blocked path
+                    @test fp_default != fp_pairwise
+                else
+                    @test fp_blocked == fp_pairwise      # the fallback fires
+                    @test fp_default == fp_pairwise      # …and so does the default
+                end
+            end
+        end
+    end
+end
+
 # End to end: the default (vertex-batched) schedule, so the blocked kernel is
 # genuinely on the path, at fixed `maxiter` and a fixed schedule RNG.
 @testset "belief_propagation blocked ≡ pairwise" begin
@@ -332,9 +412,18 @@ end
                 BPMessages(state), state; maxiter = 6, tol = 0,
                 schedule = SpanningTreeSchedule(), backend = BlockedBackend(),
             )
+            # No `backend` at all: the whole default route, selection included.
+            m_d = belief_propagation(
+                BPMessages(state), state; maxiter = 6, tol = 0,
+                schedule = SpanningTreeSchedule(),
+            )
+            forced = _expect_blocked(P) ? m_b : m_p
             for e in keys(m_p.messages)
                 @test space(m_b[e]) == space(m_p[e])
                 @test m_b[e] ≈ m_p[e]
+                # bitwise, not `≈`: the default must be the *same* kernel, not
+                # merely a numerically equivalent one.
+                @test m_d[e].data == forced[e].data
             end
         end
     end

@@ -349,9 +349,15 @@ requested targets are built, so a small subset costs proportionally less. Like
 the single-edge method, neither variant mutates `msgs` nor normalises the result;
 `compute_message` allocates the output vector, `compute_message!` fills `out`.
 
-Passing [`BlockedBackend`](@ref) as `backend` selects an alternative formulation
-of the same contraction with fewer copy passes (the `Layout(k)` kernel further
-down this file); [`PairwiseBackend`](@ref) forces this one, which is the default.
+Two formulations of the same contraction are implemented: the *pairwise* one
+described above, and the `Layout(k)` *blocked* one further down this file, which
+has fewer copy passes and folds the fermionic signs into the (χ²-sized) messages.
+An ordinary `backend` (e.g. the default `DefaultBackend()`) **selects between
+them automatically**, on `Canopy.uses_blocked_kernel(state[v])` — see
+[`BlockedBackend`](@ref) for what that predicate covers and why `Trivial` is
+excluded. [`BlockedBackend`](@ref) and [`PairwiseBackend`](@ref) override the
+choice and force their respective kernels, which is how the two are
+differentially tested against each other.
 """
 function compute_message(
         msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
@@ -405,12 +411,49 @@ end
 # and bump-allocated under one checkpoint freed at the end. Only the prefix up to
 # the largest target and the suffix down to the smallest are built, so a clustered
 # subset costs proportionally less than all `d` outputs.
+#
+# Kernel selection lives here. An ordinary backend takes the blocked
+# (`Layout(k)`) kernel whenever `uses_blocked_kernel` holds and this pairwise one
+# otherwise; the two selector backends force their own path regardless.
+# `uses_blocked_kernel` is a pure function of the source tensor's space and
+# storage *types*, so the branch is constant-folded at any call site whose state
+# type is concrete.
+#
+# MEASURED, and the reason the predicate carries no size threshold: on the
+# degree-3 honeycomb vertex, interleaved same-fixture A/B, the blocked kernel is
+# never slower at any measured (symmetry, χ) — see
+# `benchmark/reports/backend_ab.md`, and `benchmark/bench_backend_ab.jl` for why
+# a `SUITE` group cannot be used to re-measure this. `Trivial` is excluded inside
+# `uses_blocked_kernel` itself: it is the one case where the pairwise path has a
+# structural advantage, short-circuiting via `has_array_view` to plain-array
+# TensorOperations and one large BLAS call.
 function compute_message!(
         out, msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
     isempty(edges) && return out
-    backend = inner_backend(backend)
+    inner = inner_backend(backend)
+    return if uses_blocked_kernel(state[first(first(edges))])
+        _blocked_message!(out, msgs, state, edges, inner, allocator)
+    else
+        _pairwise_message!(out, msgs, state, edges, inner, allocator)
+    end
+end
+
+# `PairwiseBackend` forces this path, whatever the selection rule would say.
+function compute_message!(
+        out, msgs::BPMessages, state::TensorNetworkState,
+        edges::AbstractVector{<:DirectedEdge}, backend::PairwiseBackend,
+        allocator = default_allocator(state),
+    )
+    isempty(edges) && return out
+    return _pairwise_message!(out, msgs, state, edges, inner_backend(backend), allocator)
+end
+
+function _pairwise_message!(
+        out, msgs::BPMessages, state::TensorNetworkState,
+        edges::AbstractVector{<:DirectedEdge}, backend, allocator,
+    )
     v = first(first(edges))
     T = state[v]
     M = numind(T)
@@ -557,7 +600,7 @@ function compute_message!(
     inner = inner_backend(backend)
     # Non-abelian / non-`Array` / `Trivial`: the pairwise kernel stays the oracle.
     uses_blocked_kernel(state[first(first(edges))]) ||
-        return compute_message!(out, msgs, state, edges, inner, allocator)
+        return _pairwise_message!(out, msgs, state, edges, inner, allocator)
     return _blocked_message!(out, msgs, state, edges, inner, allocator)
 end
 
