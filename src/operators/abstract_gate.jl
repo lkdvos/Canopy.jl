@@ -9,6 +9,15 @@ is a `NamedTuple` with at least the fields `ϵ` (truncation error) and `logλ`
 """
 abstract type AbstractGate{T <: Number, S <: ElementarySpace, V} end
 
+"""
+    sites(gate) -> NTuple{N, V}
+
+The vertices `gate` acts on. Defaults to the `sites` field, which
+[`LocalGate`](@ref) has; other gate types may compute it, so callers should use this rather
+than reaching for `gate.sites`.
+"""
+sites(g::AbstractGate) = g.sites
+
 Base.keytype(g::AbstractGate) = keytype(typeof(g))
 Base.keytype(::Type{<:AbstractGate{T, S, V}}) where {T, S, V} = V
 

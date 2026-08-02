@@ -13,6 +13,10 @@ it is fermion-specific *code paths*: the same generic routines run for bosonic
 and fermionic spaces, and the fermionic signs fall out of the conventions below
 plus TensorKit's automatic braiding.
 
+Sections 1–5 are written for [`TensorNetworkState`](@ref), whose single physical leg per site
+is the simpler case. [The operator path](@ref) at the end covers what a second physical leg
+adds — which is less than one might expect.
+
 ## 1. A global vertex order fixes the fermion order
 
 Everything rests on one idea: a single global ordering of the vertex keys
@@ -184,15 +188,17 @@ already round-trips), and it mirrors the `isdual → twist` rule in `_mul_leg!`.
 
 `reduced_density_matrix` builds a ket–bra double layer — the ket is the
 message-dressed site tensor (`attach_all_messages` / `attach_messages`), the bra
-is the adjoint `state[v]'` — contracts it with `ncon`, and then applies a
-`twist!` on the physical **ket** legs:
+is the adjoint `state[v]'` — and applies a `twist!` to every physical leg of the
+**ket** layer before contracting with `ncon`:
 
 ```julia
-# single site
-ρ = twist!(repartition(ncon(tensors, indices), 1, 1), 1)
-# two sites (physical ket legs 1 and 2)
-ρ = twist!(repartition(ncon(tensors, indices), 2, 2), (1, 2))
+_twist_physical!(T, np) = twist!(T, ntuple(identity, np))     # np = num_physical
 ```
+
+The twist is diagonal in the sector of the leg it acts on, so twisting the site
+tensor and twisting the corresponding leg of the result are the same thing; doing
+it on the site tensor is what lets the state and operator cases share one
+expression. For a state `np = 1`, so this is the single open ket leg.
 
 For the two-site case the shared virtual bond between the sites is stitched by
 overwriting the `ncon` index slots via `leg_index` in both directions. The result
@@ -232,6 +238,45 @@ Each case compares `apply!` against a direct dense gate contraction
 The bosonic round-trip tests additionally hit the `k₁ = 1` and `k₁ = N` leg-
 permutation boundary cases.
 
+## The operator path
+
+A [`TensorNetworkOperator`](@ref) has **two** physical legs in the codomain instead of one, and
+that adds exactly three places where a fermionic sign could go wrong. Two of them turn out to
+need nothing at all; the third needs one twist.
+
+**Gate application needs no new twist.** Relative to the state kernel, `apply!` on an operator
+adds (a) a second codomain leg that crosses the QR/SVD partition — it rides in the `Q`
+environment for a one-sided action and in the `R` factor for a sandwich — and (b), under
+[`RightAction`](@ref) or [`SandwichAction`](@ref), a gate contracted against a **dual** codomain
+leg. Neither needs a compensating factor, for the same reason: every leg move on this path goes
+through `permute` / `repartition` / `tensorcontract!`, all of which insert TensorKit's braiding
+automatically. The one place in the kernel that does *not* — the space-preserving `_mul_leg!`
+fast path — already carries its own `isdual → twist(σ)` rule, and that rule is stated per
+*virtual* leg (`f₂.uncoupled[k]`), so it generalizes to `np = 2` unchanged.
+
+The dual slot-2 leg is often described as "supplying the transpose for free" in
+`ρG`. The fermionic statement of the same fact is that it also supplies the *braiding* for free:
+the sign that a manual transpose would have had to insert is the sign the dual contraction
+already carries.
+
+This is asserted, not assumed: `test/test_apply_gate_operator.jl` runs the full
+dense-equivalence sweep — all three actions, `chain-3` / `star-5` / `cycle-4` / `K₄`,
+reverse-orientation and `g ∘ g†` round-trip — on `fℤ₂` and `fℤ₂ ⊠ U(1)` rows, against
+`𝒢 ρ`, `ρ 𝒢` and `𝒢 ρ 𝒢†` built from the densely materialized operator.
+
+**The density matrix needs one.** `reduced_density_matrix` on an operator reads it as a
+purification and traces the slot-2 (ancilla) leg against its own adjoint. That is a leg closed
+back onto the same layer, i.e. a fermionic *partial trace*, and it needs its parity factor —
+the same kind of factor a `dual` virtual leg needs in `_mul_leg!`. It is supplied by the
+`_twist_physical!` of [4. Expectation values](@ref), which twists **every** physical ket leg
+rather than only the open one. Omitting it does not merely shift a number: the resulting matrix
+is not positive, which is what the eigenvalue check in `test/test_expect_operator.jl` catches.
+
+**Construction and the fused view were already safe.** `identity_operator` builds
+`repartition(id(P), 2, 0)`, and `TensorMap(op)` materializes with `ncon` — both are
+braiding-aware. `TensorNetworkState(op)` fuses `P ⊗ dual(P)` by reinterpreting the block storage,
+which is a relabelling and carries no sign at all; `test/test_operators.jl` guards it on `fℤ₂`.
+
 ## Quick reference: every fermion-sign site
 
 | Concern | Location | Mechanism |
@@ -245,5 +290,9 @@ permutation boundary cases.
 | Message-absorption twist | `_mul_leg!` | `dualleg ? twist(σ) : One()` per fusion tree |
 | Absorb-path selection | `_absorb_legs` | space-preserving → twist; space-flipping → none |
 | Bra layer (conjugation) | `compute_message!`, `reduced_density_matrix` | adjoint `'` / conjugation flag |
-| RDM physical-leg twist | `reduced_density_matrix` | `twist!(ρ, 1)` / `twist!(ρ, (1, 2))` |
-| Correctness gate | `test/test_apply_gate.jl` | dense-equivalence diagnostic, fermionic row |
+| RDM physical-leg twist | `_twist_physical!` in `reduced_density_matrix` | twist **every** physical ket leg, `ntuple(identity, np)` |
+| Operator ancilla trace | `reduced_density_matrix` (operator) | covered by the same `_twist_physical!` — slot 2 is a physical leg |
+| Operator gate application | `apply!` (operator, all three actions) | *nothing*: `permute`/`repartition`/`tensorcontract!` braid automatically |
+| Fused view `P ⊗ dual(P)` | `_fuse_physical` | pure relabelling of block storage — sign-free |
+| Correctness gate (states) | `test/test_apply_gate.jl` | dense-equivalence diagnostic, fermionic row |
+| Correctness gate (operators) | `test/test_apply_gate_operator.jl`, `test/test_expect_operator.jl` | dense sweep on `fℤ₂` and `fℤ₂ ⊠ U(1)`; RDM vs `X X†` |

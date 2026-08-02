@@ -37,11 +37,15 @@ include("bumper.jl")
 include("edges.jl")
 
 include("states/charges.jl")
+include("states/abstract_tensornetwork.jl")
 include("states/tensornetworkstate.jl")
 include("states/lattices.jl")
 include("states/productstate.jl")
+include("states/tensornetworkoperator.jl")
+export AbstractTensorNetwork, TensorNetworkOperator
 export square_lattice, triangular_lattice, hexagonal_lattice
 export product_state, randn_state, rand_state
+export identity_operator, randn_operator, rand_operator
 export vertices
 
 include("utility.jl")
@@ -61,10 +65,14 @@ export AbstractGate
 include("operators/local_gate.jl")
 export LocalGate, apply!
 
-include("simple_update.jl")
-
 include("operators/composite_gate.jl")
 export CompositeGate, Circuit
+
+# `simple_update.jl`'s kernel dispatches on the gate action, so the enum comes first
+include("operators/gate_action.jl")
+export GateAction, LeftAction, RightAction, SandwichAction
+
+include("simple_update.jl")
 
 include("operators/trotterize.jl")
 export TrotterScheme, Strang, trotterize, edge_coloring

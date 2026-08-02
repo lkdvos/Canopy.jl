@@ -177,3 +177,9 @@ function belief_propagation(
         res
     end
 end
+
+# A `TensorNetworkOperator` runs through its fused state view — BP itself is unchanged, and
+# the resulting messages are directly usable by `apply!` on the operator. The view is built
+# here rather than cached because it aliases `op`'s storage.
+belief_propagation(messages::BPMessages, op::TensorNetworkOperator; kwargs...) =
+    belief_propagation(messages, TensorNetworkState(op); kwargs...)

@@ -93,6 +93,11 @@ function BPMessages(state::TensorNetworkState)
     return BPMessages(messages)
 end
 
+# A `TensorNetworkOperator` reaches BP through its fused state view: message spaces involve
+# only virtual legs, which the view shares, so the messages are interchangeable between the
+# two objects. See `TensorNetworkState(::TensorNetworkOperator)`.
+BPMessages(op::TensorNetworkOperator) = BPMessages(TensorNetworkState(op))
+
 # Properties
 # ----------
 Base.eltype(::Type{BPMessages{T, S, A, V}}) where {T, S, A, V} = TensorMap{T, S, 1, 1, A}
@@ -130,6 +135,9 @@ Return `true` if `messages` is structurally compatible with `state`:
 Does not check that the messages are a BP fixed point; only that their
 spaces line up with `state`.
 """
+check_consistency(op::TensorNetworkOperator, msgs::BPMessages) =
+    check_consistency(TensorNetworkState(op), msgs)
+
 function check_consistency(state::TensorNetworkState, msgs::BPMessages)
     es = edges(state)
     2 * length(es) == length(msgs.messages) || return false
@@ -149,12 +157,14 @@ end
 # BP contractions
 # ---------------
 
+# `k` is a *virtual* (domain) leg index; the corresponding tensor slot is `NP + k`, where
+# `NP = numout` is the number of physical legs (1 for a state, 2 for an operator).
 function _mul_leg!(
-        dst::TensorMap{<:Any, S, 1, N}, src::TensorMap{<:Any, S, 1, N}, L, k::Int,
+        dst::TensorMap{<:Any, S, NP, N}, src::TensorMap{<:Any, S, NP, N}, L, k::Int,
         backend, allocator,
-    ) where {S, N}
-    M = N + 1
-    d = k + 1
+    ) where {S, NP, N}
+    M = NP + N
+    d = NP + k
     oindA = TupleTools.deleteat(ntuple(identity, M), d)
     pB = ((2,), (1,))                                  # contract L's codomain, keep its domain
     pAB = (ntuple(j -> j < d ? j : (j == d ? M : j - 1), M), ())  # restore the new leg to slot `d`
@@ -172,22 +182,29 @@ function _mul_leg!(
     return dst
 end
 
-function _absorb_legs(T::TensorMap{Tn, S, 1, N, A}, leg_factors, backend, allocator) where {Tn, S, N, A}
+function _absorb_legs(T::TensorMap{Tn, S, NP, N, A}, leg_factors, backend, allocator) where {Tn, S, NP, N, A}
     factors = collect(leg_factors)
     isempty(factors) && return copy(T)
-    M = N + 1
+    M = NP + N
     cp = allocator_checkpoint!(allocator)
     out = T
     for i in eachindex(factors)
         k, L = factors[i]
-        d = k + 1
+        d = NP + k
         oindA = TupleTools.deleteat(ntuple(identity, M), d)
         pA = (oindA, (d,))
         pB = ((2,), (1,))
-        pAB = ((1,), ntuple(j -> j + 1 < d ? j + 1 : (j + 1 == d ? M : j), N))  # new leg back to slot d
+        # physical legs 1:NP are untouched (d > NP always); the new leg goes back to slot d
+        pAB = (
+            ntuple(identity, NP),
+            ntuple(j -> (jj = NP + j; jj < d ? jj : (jj == d ? M : jj - 1)), N),
+        )
         TC = promote_contract(scalartype(out), scalartype(L))
         new_out = tensoralloc_contract(TC, out, pA, false, L, pB, false, pAB, Val(i != lastindex(factors)), allocator)
-        if space(L, 1) == space(out, d)
+        # `_mul_leg!` indexes the *domain* fusion tree with `k`, so it is only valid for a
+        # virtual leg — `d > NP` is guaranteed here, but assert it so a future slot-addressed
+        # caller cannot silently route a physical leg through this fast path.
+        if d > NP && space(L, 1) == space(out, d)
             _mul_leg!(new_out, out, L, k, backend, allocator)          # space-preserving (BP message)
         else
             tensorcontract!(new_out, out, pA, false, L, pB, false, pAB, One(), Zero(), backend, allocator)  # space-flipping (gauge √)
@@ -195,6 +212,29 @@ function _absorb_legs(T::TensorMap{Tn, S, 1, N, A}, leg_factors, backend, alloca
         out === T || tensorfree!(out, allocator)
         out = new_out
     end
+    allocator_reset!(allocator, cp)
+    return out
+end
+
+# Contract `L`'s leg `3 - keep` into tensor slot `slot` of `T`, re-emitting L's `keep` leg
+# at `slot` so the result has `T`'s leg layout with that one space replaced. Unlike
+# `_absorb_legs` this addresses an *absolute* slot, so it also reaches physical legs — which
+# is what a one-site gate needs. Always the plain contraction path: TensorKit inserts the
+# right braiding for a general slot, whereas `_mul_leg!` is a fast path valid only for
+# space-preserving *domain* absorptions.
+function _absorb_slot(T::AbstractTensorMap, slot::Int, L, keep::Int, backend, allocator)
+    M = numind(T)
+    np = numout(T)
+    oindA = TupleTools.deleteat(ntuple(identity, M), slot)
+    pA = (oindA, (slot,))
+    pB = ((3 - keep,), (keep,))
+    # pairwise output is `(oindA..., L's kept leg)`, so slot `slot` sits last at position M
+    pos(i) = i == slot ? M : (i < slot ? i : i - 1)
+    pAB = (ntuple(pos, np), ntuple(j -> pos(np + j), numin(T)))
+    TC = promote_contract(scalartype(T), scalartype(L))
+    out = tensoralloc_contract(TC, T, pA, false, L, pB, false, pAB, Val(false))
+    cp = allocator_checkpoint!(allocator)
+    tensorcontract!(out, T, pA, false, L, pB, false, pAB, One(), Zero(), backend, allocator)
     allocator_reset!(allocator, cp)
     return out
 end
@@ -218,7 +258,7 @@ listed in `edges` — including padded unit-space legs — pass through
 unchanged.
 """
 function attach_messages(
-        state::TensorNetworkState, msgs::BPMessages, site, edges,
+        state::AbstractTensorNetwork, msgs::BPMessages, site, edges,
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
     leg_factors = map(edges) do e
@@ -236,7 +276,7 @@ BP message at `site` into the corresponding virtual leg of `state[site]`.
 Equivalent to `attach_messages(state, msgs, site, incoming_edges(state, site))`.
 """
 attach_all_messages(
-    state::TensorNetworkState, msgs::BPMessages, site,
+    state::AbstractTensorNetwork, msgs::BPMessages, site,
     backend = DefaultBackend(), allocator = default_allocator(state),
 ) = attach_messages(state, msgs, site, incoming_edges(state, site), backend, allocator)
 

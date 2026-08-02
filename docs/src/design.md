@@ -16,7 +16,7 @@ There is no separate generic graph type. The state's per-vertex adjacency list l
 - **Vertex keys** are arbitrary user-chosen types `V` (typically `Int`); they are used directly as keys into `Dictionaries.jl` containers.
 - **Containers are static.** No structural mutation of the vertex/adjacency dictionaries after construction; tensor values can be updated freely.
 - **Edge orientation in the state** is fixed by vertex ordering: for undirected edge `(u, v)` we store the key with `u ≤ v`. The smaller-keyed endpoint is the source.
-- **Codomain/domain split.** Every vertex tensor has exactly **one** physical leg in the codomain and a fixed number `N` of virtual legs in the domain, where `N` is the maximum coordination of the graph. Virtual legs beyond the vertex's actual degree are padded with `oneunit(S)` and contribute trivially to contractions.
+- **Codomain/domain split.** Every vertex tensor has its physical legs in the codomain and a fixed number `N` of virtual legs in the domain, where `N` is the maximum coordination of the graph. A [`TensorNetworkState`](@ref) has **one** physical leg, a [`TensorNetworkOperator`](@ref) has **two**; virtual leg `k` therefore sits at tensor slot `k + numout`. Virtual legs beyond the vertex's actual degree are padded with `oneunit(S)` and contribute trivially to contractions.
 - **Duality.** Virtual spaces are stored once per undirected edge as non-dual `S` values. For an edge `e = (u, v)` (canonical, `u < v`) with stored space `V_e`, the `u`-side carries `V_e` and the `v`-side carries `dual(V_e)`. The constructor enforces non-dual input; `check_consistency` verifies the duality invariant across the whole network. This duality convention is also what makes the fermionic signs consistent — see [Fermionic correctness](@ref).
 - **No multigraphs, no self-loops.**
 
@@ -158,11 +158,75 @@ Two design decisions are worth recording here.
 
 **The charge bath is an ordinary vertex, not a tracked one.** A closed network of charge-conserving tensors has trivial total charge, so a state in a nontrivial global sector needs one auxiliary vertex carrying the compensating charge on a 1-dimensional bond. That vertex is deliberately *not* recorded in the struct: it appears in `vertices(state)` and `TensorMap(state)` like any other, and callers exclude it from gate lists and observables themselves. Tracking it would add a field and touch every place that iterates vertices, for a construction-time concern — see the open questions below. It attaches to a minimum-degree vertex so that it does not raise `N` and thereby give every tensor in the network an extra `oneunit`-padded leg.
 
+## Tensor network operator
+
+`TensorNetworkOperator` holds **two** physical legs per site, both in the codomain, as the
+vectorization of a linear map: slot 1 is the ket (row) index carrying `P_v` and slot 2 the bra
+(column) index carrying `dual(P_v)`. Everything else — adjacency, bond duality, `oneunit`
+padding — is shared with `TensorNetworkState` via the `AbstractTensorNetwork` supertype, and
+[`Canopy.num_physical`](@ref) supplies the one number that differs. See
+[Operators and density matrices](@ref) for the full interface.
+
+`AbstractTensorNetwork` is deliberately a *closed* internal supertype over the two
+representations this package owns. It is not the data-agnostic graph layer rejected above: it
+makes no promise to outside subtypes, and every method on it reaches directly into the
+`adjacency`/`vertices` fields.
+
+### Belief propagation reuses the state path verbatim
+
+Keeping both physical legs in the codomain means fusing them is a pure reinterpretation of the
+same storage — the fusion trees of `P₁ ⊗ P₂ → c` enumerate exactly the degeneracy basis of
+`fuse(P₁, P₂)` in sector `c`, in the same order, and `unitary(fuse ← P₁⊗P₂)` is block-wise the
+identity. So `TensorNetworkState(op)` shares `data` with `op`, and because BP closes every
+physical leg between ket and bra at the same vertex, the fused state's messages are *identical*
+to the operator's. The message kernels, schedules and `belief_propagation` are untouched.
+
+**This is a deliberate dependence on TensorKit's internal block layout**, not on its documented
+contract. It is load-bearing, and the price is paid explicitly: `test/test_operators.jl` asserts
+`_fuse_physical(t) ≈ unitary(fuse ← codomain(t)) * t` and `.data === t.data` across `Trivial`,
+`U₁`, `SU₂` and `fℤ₂`, so a layout change in TensorKit fails there loudly rather than corrupting
+BP silently. The alternative — threading a physical-leg offset through every message kernel —
+was rejected as the worse trade.
+
+Note what BP on a two-leg network computes: the environment of `tr(ρ†ρ)`, not `tr(ρ)`. A true
+trace is a *single-layer* contraction needing vector-valued messages, i.e. a different
+algorithm.
+
+### Gate application
+
+The only genuinely new machinery. The `GateAction` enum — `LeftAction`, `RightAction`,
+`SandwichAction`, passed as the `action` keyword of `apply!` and defaulting to the two-sided one
+— records which physical slots a gate acts on; those slots are the single parameter the two-site
+kernel needs. The action is union-split by hand into three calls, each passing a literal slot
+tuple and its own `θ` contraction as a `do` block, so the kernel's leg bookkeeping — all of it
+derived from `length(acted)` — infers as if the action were static.
+Legs the gate does not touch stay in the QR environment, so a one-sided operator gate costs
+exactly what the same gate costs on a state — only `SandwichAction` pays `d²`.
+
+The duality convention removes all transposes: a dual codomain leg contracts directly against a
+non-dual gate leg, so right-multiplication just consumes the gate's *codomain* instead of its
+domain. That same convention is what makes the operator path fermion-correct with no extra
+`twist!`: see [Fermionic correctness](@ref).
+
+### Measuring a density matrix
+
+`reduced_density_matrix` and `expect` accept either network. On an operator they read it as a
+purification — slot 1 physical, slot 2 ancilla — and return the marginal of `X X† / tr(X X†)`,
+which is the object belief propagation already converges the environment of. The state and
+operator contractions are one pair of methods parameterized by `num_physical`: the operator
+simply closes its second physical leg against its own adjoint inside the same `ncon`.
+
 ## Open questions / future work
 
+- **Single-layer BP** for a true `trace(ρ)` and for the single-layer operator expectation value
+  `tr(ρO)/tr(ρ)`: vector-valued messages and a separate fixed-point iteration. The *double*-layer
+  observable `tr(O·XX†)/tr(XX†)` — the thermal average when `X = exp(-βH/2)` — is already
+  available as `expect(op, msgs, O, sites)`.
+- **`product_operator`** with per-site local operators, and `|ψ⟩⟨ψ|` from a state (needs `A ⊗ Ā`
+  with fused bonds, i.e. `χ²`).
 - **Message bond dimensions** independent of state bond dimensions (for loop-corrected BP, boundary-MPS environments). The current shape supports this — `BPMessages` is parameterized independently — but the constructor and `check_consistency` check will need refinement.
 - **Auxiliary-vertex tracking** so that observables, gate lists and Trotter schemes can skip charge-bath sites automatically instead of by caller convention. Would add a field to the struct and touch every place that iterates vertices.
 - **Non-abelian product states**, which need degeneracy and multiplicity indices to be distinguished in the local-state specification, and a fusion-tree solve rather than the current unique-fusion one.
 - **Mutable graphs** for coarse-graining / RG workflows. Out of scope for v1; would force `adjacency` and `vertices` to support structural updates.
 - **Adjacency matrix cache** as a derived field for spectral graph operations. Add only if profiling justifies.
-- **Multiple outer legs per site** (e.g. ancillas) with symbolic naming. Currently the codomain is a single physical leg; a thin wrapper can extend this without touching the core.
+- **More than two outer legs per site**, with symbolic naming. Two are supported (see [Tensor network operator](@ref)); a third would want the leg count as a type parameter rather than a third struct.
