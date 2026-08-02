@@ -552,10 +552,10 @@ end
 #
 # Every leg `j ≠ k` is absorbed exactly once for target `k` (ket chain if `j < k`,
 # bra chain if `j > k`), so `twist(σⱼ)` folds into the **transposed message** (a χ²
-# pass, in `_blocked_step`) and the only remainder is the physical leg, folded into
-# the ket entry copy when the physical space is dual. Padded legs carry the unit
-# sector (`twist(unit) == 1`) and drop out. Net: no `twist!` pass over any chain
-# link and none on the output.
+# pass, in `_transposed_message`) and the only remainder is the physical leg,
+# folded into the ket entry copy when the physical space is dual. Padded legs
+# carry the unit sector (`twist(unit) == 1`) and drop out. Net: no `twist!` pass
+# over any chain link and none on the output.
 #
 # The literal reading of the two bullets — fold all of `Z` into the ket entry,
 # twist message `j` only when `!isdual(space(T, j+1))`, and finish with
@@ -563,27 +563,99 @@ end
 # distributed differently, and was checked to agree numerically; it costs one
 # extra `dim(T)`-sized pass, which is why the factors live on the messages here.
 
-# One chain step: absorb `msg` (an incoming message, or its adjoint for the bra
+# `twist!(mt, (1,))` for a message-shaped (`1 ← 1`) tensor, without the
+# per-subblock hashed lookup.
+#
+# `TensorKit.twist!` walks `fusiontrees(t)` and reaches each subblock through
+# `t[f₁, f₂]`. That `getindex` is not just a `Dictionary` `gettoken`: `subblock`
+# rebuilds a whole `subblockstructure` `Dictionary` per call, and each rebuild
+# takes two `GlobalLRUCache` lookups (`sectorstructure` and `degeneracystructure`,
+# one `SpinLock` each, taken on hits too). A `1 ← 1` tensor has exactly one
+# fusion tree pair per coupled sector and a single-leg tree's uncoupled sector
+# *is* its coupled one, so scaling `blocks(mt)` by `twist(c)` is the same
+# operation with one structure lookup for the whole tensor instead of one pair
+# per sector.
+function _twist_message!(mt)
+    for (c, b) in blocks(mt)
+        θ = twist(c)
+        isone(θ) || scale!(b, θ)
+    end
+    return mt
+end
+
+# Incoming message `j` in composable form: transposed to `pmsg = ((2,), (1,))`
+# so that composition contracts its ket index and leaves its bra index as the
+# new leg, and twisted on its codomain leg — the per-coupled-sector `twist(σⱼ)`
+# derived above, at χ² cost.
+function _transposed_message(msg, pmsg, backend, allocator)
+    mt = tensoralloc_add(scalartype(msg), msg, pmsg, false, Val(true), allocator)
+    tensoradd!(mt, msg, pmsg, false, One(), Zero(), backend, allocator)
+    return _twist_message!(mt)
+end
+
+# The transposed messages, hoisted out of both chains: `msgt[j]` is absorbed by
+# the ket chain (`j < legmax`) and `adjoint(msgt[j])` by the bra chain
+# (`j > legmin`), so every leg but the lone target of a single-target call is
+# built here. `nothing` when neither chain takes a step (`d == 1`).
+#
+# Sharing one tensor between the chains rests on
+#
+#     twist(permute(m', pmsg), 1) == adjoint(twist(permute(m, pmsg), 1))
+#
+# which holds exactly (not just to rounding) for all four duality patterns of a
+# `1 ← 1` message: messages are sector-diagonal, so both indices carry the same
+# sector and the twist is the same real `±1` either way.
+#
+# It matters because `tensoradd!` *from* an `AdjointTensorMap` — what the bra
+# chain used to transpose — misses TensorKit's flat-data `add_transform_kernel!`
+# and falls back to the generic one, which reaches both operands through
+# `t[f₁, f₂]` once per fusion tree. Hoisting also transposes a leg absorbed by
+# both chains once instead of twice (`d` transposes rather than `2d - 2` when
+# every outgoing edge is a target).
+#
+# Cost of holding them: `d` χ²-sized buffers for the duration of the call,
+# against the `≈ 2d` links of `dim(space(T)) = dim(P) · χ^d` the chains already
+# hold live.
+function _transposed_messages(incoming, legmin, legmax, pmsg, backend, allocator)
+    d = length(incoming)
+    absorbed(j) = j < legmax || j > legmin
+    j0 = findfirst(absorbed, 1:d)
+    isnothing(j0) && return nothing
+    mt = _transposed_message(incoming[j0], pmsg, backend, allocator)
+    msgt = Vector{typeof(mt)}(undef, d)
+    msgt[j0] = mt
+    for j in (j0 + 1):d
+        absorbed(j) || continue
+        msgt[j] = _transposed_message(incoming[j], pmsg, backend, allocator)
+    end
+    return msgt
+end
+
+# One chain step: absorb the composable message `mt` (or its adjoint, on the bra
 # chain) into the sole domain leg of the `Layout` link `link` and re-emit in the
 # neighbouring layout, `p` being the axis transposition.
 #
-# `msg` is transposed to `pmsg = ((2,), (1,))` so that composition contracts its
-# ket index and leaves its bra index as the new leg, and twisted on its codomain
-# leg — the per-coupled-sector `twist(σⱼ)` derived above, at χ² cost. The
-# composition itself is one `gemm` per coupled sector with no copy of `link`
-# (`pid` is `link`'s own partition and only sizes the output buffer).
+# The composition is one `gemm` per coupled sector with no copy of `link` (`pid`
+# is `link`'s own partition and only sizes the output buffer), and `tmp` is
+# taken above a checkpoint and released before returning, so only the chain
+# links stay live.
 #
-# Both temporaries are taken above a checkpoint and released before returning, so
-# only the chain links stay live. The transposed message is rebuilt per step
-# rather than cached per leg: a message used by both chains costs one extra χ²
-# permute, against `d` message-sized allocations held for the whole call — which
-# is a *worse* trade at low coordination, where the on-site tensor is small.
-function _blocked_step(link, msg, pmsg, pid, p, backend, allocator)
+# `mul!` cannot write into a differently-partitioned destination, hence the
+# separate re-permute. Writing this as a single `tensorcontract!(result, link,
+# pid, false, mt, ((1,), (2,)), false, p, …)` does **not** fuse the two, and this
+# was measured rather than assumed. `p` exchanges a codomain axis with the lone
+# domain axis, so `TO.isblasdestination(result, p)` is `false`, `copyC` is taken,
+# and `blas_contract!` allocates the very same `dim(space(T))` intermediate and
+# pays the very same second pass. Interleaved A/B over
+# `{z2, fz2, fz2_u1, fz2_u1_flat} × χ ∈ {8, 32, 64}` on the honeycomb vertex: the
+# fused form is **0.3-9.8% slower** at every point, never faster, the cost being
+# `tensorcontract!`'s `_contract_candidates` / `_contract_memcost` dispatch.
+# (It can also be worse than that: when the contracted leg is dual on the message
+# side, `blas_contract!` twists — and therefore copies — `mt` itself, duplicating
+# the twist `_transposed_message` has already folded in.)
+function _blocked_step(link, mt, pid, p, backend, allocator)
     result = tensoralloc_add(scalartype(link), link, p, false, Val(true), allocator)
     cp = allocator_checkpoint!(allocator)
-    mt = tensoralloc_add(scalartype(msg), msg, pmsg, false, Val(true), allocator)
-    tensoradd!(mt, msg, pmsg, false, One(), Zero(), backend, allocator)
-    twist!(mt, (1,))
     tmp = tensoralloc_add(scalartype(link), link, pid, false, Val(true), allocator)
     mul!(tmp, link, mt)
     tensoradd!(result, tmp, p, false, One(), Zero(), backend, allocator)
@@ -631,6 +703,9 @@ function _blocked_message!(
 
     cp = allocator_checkpoint!(allocator)
 
+    # the messages both chains absorb, in composable form, built once per leg
+    msgt = _transposed_messages(incoming, legmin, legmax, pmsg, backend, allocator)
+
     # ket chain, `Layout(1)` up to `Layout(legmax)`: `ket[k]` has messages 1 … k-1
     # absorbed. The link type is read off the first link, so the container is
     # concrete and GPU-portable.
@@ -640,7 +715,7 @@ function _blocked_message!(
     ket = Vector{typeof(ket1)}(undef, d)
     ket[1] = ket1
     for k in 1:(legmax - 1)
-        ket[k + 1] = _blocked_step(ket[k], incoming[k], pmsg, pid, pswap(k + 1), backend, allocator)
+        ket[k + 1] = _blocked_step(ket[k], msgt[k], pid, pswap(k + 1), backend, allocator)
     end
 
     # bra chain, `Layout(d)` down to `Layout(legmin)`: `bra[k]` has messages
@@ -651,7 +726,7 @@ function _blocked_message!(
     bra[d] = brad
     for k in (d - 1):-1:legmin
         bra[k] = _blocked_step(
-            bra[k + 1], adjoint(incoming[k + 1]), pmsg, pid, pswap(k + 1), backend, allocator
+            bra[k + 1], adjoint(msgt[k + 1]), pid, pswap(k + 1), backend, allocator
         )
     end
 
