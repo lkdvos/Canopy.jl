@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Free fermions at finite temperature · Canopy.jl</title><meta name="title" content="Free fermions at finite temperature · Canopy.jl"/><meta property="og:title" content="Free fermions at finite temperature · Canopy.jl"/><meta property="twitter:title" content="Free fermions at finite temperature · Canopy.jl"/><meta name="description" content="Documentation for Canopy.jl."/><meta property="og:description" content="Documentation for Canopy.jl."/><meta property="twitter:description" content="Documentation for Canopy.jl."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">Canopy.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../../design/">Design</a></li><li><a class="tocitem" href="../../states/">Constructing states</a></li><li><a class="tocitem" href="../../operators/">Operators and density matrices</a></li><li><a class="tocitem" href="../../fermions/">Fermions</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../">Examples</a></li><li><a class="tocitem" href="../free_fermion_honeycomb/">Free fermions on a honeycomb lattice</a></li><li><a class="tocitem" href="../free_fermion_ring/">Free fermions on a ring</a></li><li class="is-active"><a class="tocitem" href>Free fermions at finite temperature</a><ul class="internal"><li><a class="tocitem" href="#The-purification-picture,-and-where-the-factor-of-two-lives"><span>The purification picture, and where the factor of two lives</span></a></li><li><a class="tocitem" href="#Exact-single-particle-reference"><span>Exact single-particle reference</span></a></li><li><a class="tocitem" href="#Free-fermion-bond-operators"><span>Free-fermion bond operators</span></a></li><li><a class="tocitem" href="#Sweeping-β"><span>Sweeping β</span></a></li><li><a class="tocitem" href="#Geometries"><span>Geometries</span></a></li><li><a class="tocitem" href="#Run-and-plot"><span>Run and plot</span></a></li></ul></li><li><a class="tocitem" href="../qasm_circuit/">Running OpenQASM circuits</a></li><li><a class="tocitem" href="../realtime/">Real-time evolution of free fermions</a></li><li><a class="tocitem" href="../tfim_chain_ring/">Transverse-field Ising model on a ring</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Free fermions at finite temperature</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Free fermions at finite temperature</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/lkdvos/Canopy.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/lkdvos/Canopy.jl/blob/main/examples/free_fermion_thermal/main.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Free-fermions-at-finite-temperature"><a class="docs-heading-anchor" href="#Free-fermions-at-finite-temperature">Free fermions at finite temperature</a><a id="Free-fermions-at-finite-temperature-1"></a><a class="docs-heading-anchor-permalink" href="#Free-fermions-at-finite-temperature" title="Permalink"></a></h1><p>Imaginary-time evolution of a <em>density matrix</em> for spinless free fermions,</p><p class="math-container">\[H = -t \sum_{\langle ij \rangle} \left( c^\dagger_i c_j + c^\dagger_j c_i \right) - \mu \sum_i n_i,\]</p><p>starting from the infinite-temperature state <span>$\rho(0) = \mathbb{1}$</span> and sweeping the inverse temperature <span>$\beta$</span>. The thermal averages <span>$\langle n \rangle$</span> and <span>$E/L$</span> are compared against the exact single-particle (Fermi–Dirac) result at the same finite <span>$L$</span>, on two geometries:</p><ul><li>an <strong>open chain</strong>, which is a tree — belief propagation is <em>exact</em> there, so any deviation is bond truncation or the Trotter step;</li><li>a <strong>ring</strong>, which has one loop — belief propagation is approximate, and the gap between the two curves is the loop correction.</li></ul><p>This is the finite-temperature companion to <a href="../free_fermion_ring/#Free-fermions-on-a-ring">Free fermions on a ring</a>, which reaches the ground state by imaginary-time evolution of a <em>state</em>.</p><p>This example can be run from the command line with:</p><pre><code class="nohighlight hljs">julia --project=examples examples/free_fermion_thermal/main.jl</code></pre><pre><code class="language-julia hljs">using Canopy: identity_operator, BPMessages, belief_propagation, UndirectedEdge,
+              LeftAction, apply!, expect, Strang, trotterize, edge_coloring
+using TensorKit
+using TensorKitTensors.FermionOperators: f_num, f_hopping, fermion_space
+using MatrixAlgebraKit: truncrank, trunctol
+using Statistics: mean
+using Printf
+using CairoMakie</code></pre><h2 id="The-purification-picture,-and-where-the-factor-of-two-lives"><a class="docs-heading-anchor" href="#The-purification-picture,-and-where-the-factor-of-two-lives">The purification picture, and where the factor of two lives</a><a id="The-purification-picture,-and-where-the-factor-of-two-lives-1"></a><a class="docs-heading-anchor-permalink" href="#The-purification-picture,-and-where-the-factor-of-two-lives" title="Permalink"></a></h2><p><code>identity_operator</code> is <span>$\beta = 0$</span>. Evolving it <strong>one-sided</strong> (<code>action = LeftAction</code>) with <span>$\exp(-d\tau\,h_e)$</span> builds</p><p class="math-container">\[X = e^{-\tau H}, \qquad \tau = n_\text{steps}\, d\tau,\]</p><p>and <code>expect</code> on a <code>TensorNetworkOperator</code> measures against <span>$X X^\dagger / \operatorname{tr} X X^\dagger$</span>, which is the thermal ensemble at</p><p class="math-container">\[\beta = 2\tau .\]</p><p>So one one-sided step of size <span>$d\tau$</span> advances <span>$\beta$</span> by <span>$2 d\tau$</span>. (A <code>SandwichAction</code> step applies the gate on <em>both</em> sides and advances it by <span>$4 d\tau$</span>; the one-sided route is used here because it is also the cheaper one — the untouched physical leg stays in the QR environment.)</p><h2 id="Exact-single-particle-reference"><a class="docs-heading-anchor" href="#Exact-single-particle-reference">Exact single-particle reference</a><a id="Exact-single-particle-reference-1"></a><a class="docs-heading-anchor-permalink" href="#Exact-single-particle-reference" title="Permalink"></a></h2><p>Both geometries are quadratic, so <span>$\langle n \rangle$</span> and <span>$E$</span> follow from the single-particle spectrum alone:</p><p class="math-container">\[\langle n \rangle = \frac{1}{L} \sum_k f(\varepsilon_k), \qquad
+E = \sum_k \varepsilon_k f(\varepsilon_k), \qquad
+f(\varepsilon) = \frac{1}{e^{\beta \varepsilon} + 1},\]</p><p>with <span>$\varepsilon_k = -2t\cos(\pi k/(L+1)) - \mu$</span> for <span>$k = 1 \dots L$</span> on the open chain (hard-wall modes) and <span>$\varepsilon_n = -2t\cos(2\pi n/L) - \mu$</span> for <span>$n = 0 \dots L-1$</span> on the ring.</p><pre><code class="language-julia hljs">chain_spectrum(L, μ; t = 1.0) = [-2t * cos(π * k / (L + 1)) - μ for k in 1:L]
+ring_spectrum(L, μ; t = 1.0) = [-2t * cos(2π * n / L) - μ for n in 0:(L - 1)]
+
+function exact_thermal(ε, β)
+    f = @. 1 / (exp(β * ε) + 1)
+    return sum(f) / length(ε), sum(ε .* f) / length(ε)
+end</code></pre><pre><code class="nohighlight hljs">exact_thermal (generic function with 1 method)</code></pre><h2 id="Free-fermion-bond-operators"><a class="docs-heading-anchor" href="#Free-fermion-bond-operators">Free-fermion bond operators</a><a id="Free-fermion-bond-operators-1"></a><a class="docs-heading-anchor-permalink" href="#Free-fermion-bond-operators" title="Permalink"></a></h2><p>The same edge decomposition as the ground-state example: the chemical-potential term is split over the endpoints of each bond by their degree, so that <span>$\sum_e h_e = H$</span> exactly.</p><pre><code class="language-julia hljs">function bond_hamiltonians(edges, degrees; t = 1.0, μ = 0.0)
+    P = fermion_space(Trivial)
+    hop = f_hopping(ComplexF64, Trivial)
+    nop = f_num(ComplexF64, Trivial)
+    I1 = id(P)
+    return Dict(
+        e =&gt; -t * hop - (μ / degrees[first(e)]) * (nop ⊗ I1) -
+            (μ / degrees[last(e)]) * (I1 ⊗ nop)
+            for e in edges
+    )
+end</code></pre><pre><code class="nohighlight hljs">bond_hamiltonians (generic function with 1 method)</code></pre><h2 id="Sweeping-β"><a class="docs-heading-anchor" href="#Sweeping-β">Sweeping β</a><a id="Sweeping-β-1"></a><a class="docs-heading-anchor-permalink" href="#Sweeping-β" title="Permalink"></a></h2><p>The evolution is incremental: the network is carried forward through the whole <code>βs</code> grid and measured at each point, rather than restarted from <span>$\mathbb{1}$</span> for every temperature. BP is re-converged before each measurement (and periodically during the evolution) so the Bethe environments are current.</p><pre><code class="language-julia hljs">function beta_sweep(edges, degrees, verts, βs; t = 1.0, μ = 0.0, dτ = 0.02, Dmax = 64)
+    P = fermion_space(Trivial)
+    hams = bond_hamiltonians(edges, degrees; t, μ)
+    circuit = trotterize(hams, dτ, Strang(edge_coloring(edges)))
+    trunc = truncrank(Dmax) &amp; trunctol(; atol = 1.0e-12)
+
+    ρ = identity_operator(ComplexF64, edges, P)
+    msgs = BPMessages(ρ)
+    nop = f_num(ComplexF64, Trivial)
+
+    L = length(verts)
+    n̄ = Float64[]
+    Ē = Float64[]
+    τ = 0.0                                   # accumulated one-sided time; β = 2τ
+    ϵmax = 0.0                                # worst truncation error over the whole sweep
+    nsteps = 0
+    for β in βs
+        target = β / 2
+        while τ + dτ / 2 &lt; target
+            _, _, info = apply!(ρ, msgs, circuit; action = LeftAction, trunc)
+            ϵmax = max(ϵmax, info.ϵ)
+            τ += dτ
+            nsteps += 1
+            iszero(mod(nsteps, 10)) &amp;&amp;
+                (msgs = belief_propagation(msgs, ρ; maxiter = 200, tol = 1.0e-11))
+        end
+        msgs = belief_propagation(msgs, ρ; maxiter = 400, tol = 1.0e-12)
+        push!(n̄, mean(real(expect(ρ, msgs, nop, v)) for v in verts))
+        push!(Ē, sum(real(expect(ρ, msgs, h, (first(e), last(e)))) for (e, h) in hams) / L)
+    end
+    return n̄, Ē, ϵmax
+end</code></pre><pre><code class="nohighlight hljs">beta_sweep (generic function with 1 method)</code></pre><h2 id="Geometries"><a class="docs-heading-anchor" href="#Geometries">Geometries</a><a id="Geometries-1"></a><a class="docs-heading-anchor-permalink" href="#Geometries" title="Permalink"></a></h2><pre><code class="language-julia hljs">chain_edges(L) = [UndirectedEdge(j, j + 1) for j in 1:(L - 1)]
+ring_edges(L) = [UndirectedEdge(min(j, mod1(j + 1, L)), max(j, mod1(j + 1, L))) for j in 1:L]
+
+chain_degrees(L) = Dict(j =&gt; (j == 1 || j == L) ? 1 : 2 for j in 1:L)
+ring_degrees(L) = Dict(j =&gt; 2 for j in 1:L)</code></pre><pre><code class="nohighlight hljs">ring_degrees (generic function with 1 method)</code></pre><h2 id="Run-and-plot"><a class="docs-heading-anchor" href="#Run-and-plot">Run and plot</a><a id="Run-and-plot-1"></a><a class="docs-heading-anchor-permalink" href="#Run-and-plot" title="Permalink"></a></h2><pre><code class="language-julia hljs">function main(; L::Int = 8, Dmax::Int = 64, t::Real = 1.0, μ::Real = 0.3,
+              βs = 0.0:0.25:4.0, dτ::Real = 0.02)
+    βs = collect(βs)
+    verts = 1:L
+
+    println(&quot;Free fermions at finite temperature  L=$L  Dmax=$Dmax  t=$t  μ=$μ  dτ=$dτ&quot;)
+
+    exact_chain = [exact_thermal(chain_spectrum(L, μ; t), β) for β in βs]
+    exact_ring = [exact_thermal(ring_spectrum(L, μ; t), β) for β in βs]
+
+    println(&quot;  open chain (BP exact on a tree)&quot;)
+    n_chain, E_chain, ϵ_chain = beta_sweep(chain_edges(L), chain_degrees(L), verts, βs; t, μ, dτ, Dmax)
+    println(&quot;  ring (one loop: BP approximate)&quot;)
+    n_ring, E_ring, ϵ_ring = beta_sweep(ring_edges(L), ring_degrees(L), verts, βs; t, μ, dτ, Dmax)
+    @printf &quot;  max truncation error: chain %.3e, ring %.3e\n&quot; ϵ_chain ϵ_ring
+
+    @printf &quot;  %-6s  %-12s %-12s  %-12s %-12s\n&quot; &quot;β&quot; &quot;⟨n⟩ chain&quot; &quot;exact&quot; &quot;⟨n⟩ ring&quot; &quot;exact&quot;
+    for (i, β) in enumerate(βs)
+        @printf &quot;  %-6.2f  %-12.8f %-12.8f  %-12.8f %-12.8f\n&quot; β n_chain[i] exact_chain[i][1] n_ring[i] exact_ring[i][1]
+    end
+
+    fig = Figure(size = (760, 760))
+    ax1 = Axis(fig[1, 1]; xlabel = &quot;β t&quot;, ylabel = &quot;⟨n⟩&quot;,
+               title = &quot;Free fermions, L=$L, μ=$μ, Dmax=$Dmax&quot;)
+    lines!(ax1, βs, first.(exact_chain); label = &quot;Exact (open chain)&quot;)
+    scatter!(ax1, βs, n_chain; label = &quot;TN, open chain&quot;, color = :red)
+    lines!(ax1, βs, first.(exact_ring); label = &quot;Exact (ring)&quot;, linestyle = :dash)
+    scatter!(ax1, βs, n_ring; label = &quot;TN, ring&quot;, color = :blue, marker = :cross)
+    axislegend(ax1; position = :rt)
+
+    ax2 = Axis(fig[2, 1]; xlabel = &quot;β t&quot;, ylabel = &quot;E / L&quot;)
+    lines!(ax2, βs, last.(exact_chain); label = &quot;Exact (open chain)&quot;)
+    scatter!(ax2, βs, E_chain; label = &quot;TN, open chain&quot;, color = :red)
+    lines!(ax2, βs, last.(exact_ring); label = &quot;Exact (ring)&quot;, linestyle = :dash)
+    scatter!(ax2, βs, E_ring; label = &quot;TN, ring&quot;, color = :blue, marker = :cross)
+    axislegend(ax2; position = :rt)
+
+    outdir = joinpath(@__DIR__, &quot;figs&quot;)
+    mkpath(outdir)
+    outfile = joinpath(outdir, &quot;free_fermion_thermal.svg&quot;)
+    save(outfile, fig)
+    println(&quot;wrote $outfile&quot;)
+    return fig
+end
+
+main()</code></pre><pre><code class="nohighlight hljs">Free fermions at finite temperature  L=8  Dmax=64  t=1.0  μ=0.3  dτ=0.02
+  open chain (BP exact on a tree)
+  ring (one loop: BP approximate)
+  max truncation error: chain 1.058e-06, ring 9.651e-07
+  β       ⟨n⟩ chain    exact         ⟨n⟩ ring     exact       
+  0.00    0.50000000   0.50000000    0.50000000   0.50000000  
+  0.25    0.51755089   0.51824354    0.51748919   0.51817409  
+  0.50    0.53484161   0.53377122    0.53431262   0.53329368  
+  0.75    0.54551058   0.54514560    0.54418793   0.54386559  
+  1.00    0.55241415   0.55241478    0.55010923   0.55014546  
+  1.25    0.55635903   0.55647439    0.55308246   0.55331689  
+  1.50    0.55828614   0.55838309    0.55417487   0.55467728  
+  1.75    0.55901273   0.55900683    0.55415751   0.55524021  
+  2.00    0.55893670   0.55893852    0.55363049   0.55565900  
+  2.25    0.55855877   0.55854156    0.55294229   0.55629044  
+  2.50    0.55806159   0.55802047    0.55224296   0.55728894  
+  2.75    0.55745732   0.55748083    0.55150295   0.55868682  
+  3.00    0.55696836   0.55697084    0.55096019   0.56045117  
+  3.25    0.55652243   0.55650741    0.55050338   0.56251972  
+  3.50    0.55612060   0.55609165    0.55012440   0.56482173  
+  3.75    0.55570052   0.55571751    0.54976579   0.56728906  
+  4.00    0.55537364   0.55537650    0.54951723   0.56986131  
+wrote /mnt/home/ldevos/Projects/Canopy.jl/densitymatrix/docs/src/examples/free_fermion_thermal/figs/free_fermion_thermal.svg
+</code></pre><p><img src="figs/free_fermion_thermal.svg" alt="Free fermions at finite temperature"/></p><p>The open-chain points sit on the exact curve to plotting accuracy: belief propagation is exact on a tree, so the only error is the Trotter step and the bond truncation. The ring points track the exact ring curve but drift off it as <span>$\beta$</span> grows and correlations wrap the loop — that gap is the Bethe (loop) approximation, not a truncation artefact.</p><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../free_fermion_ring/">« Free fermions on a ring</a><a class="docs-footer-nextpage" href="../qasm_circuit/">Running OpenQASM circuits »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Sunday 2 August 2026 02:00">Sunday 2 August 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
