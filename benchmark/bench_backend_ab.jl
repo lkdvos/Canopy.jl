@@ -54,7 +54,13 @@ using Canopy: compute_message, compute_message!, outgoing_edges,
 # (where `z2` had fallen to 1.028) and χ = 128 is the extrapolation check.
 const AB_CHIS = isempty(ARGS) ? (64, 128) : Tuple(parse(Int, a) for a in ARGS)
 
-const AB_SYMS = (:trivial, :z2, :fz2, :fz2_u1, :fz2_u1_flat)
+# `:su2` / `:fz2_su2` are the non-abelian rows. `uses_blocked_kernel` does not
+# require `UniqueFusion` (see `src/backends.jl`), so they take the blocked path and
+# belong in this A/B; they are also the only rows where a relayout goes through
+# TensorKit's `GenericTreeTransformer` rather than the cached
+# `AbelianTreeTransformer`. Both arms pay that, so the expectation is a tie or a
+# win, not a loss — which is exactly the claim this table has to settle.
+const AB_SYMS = (:trivial, :z2, :fz2, :fz2_u1, :fz2_u1_flat, :su2, :fz2_su2)
 
 const AB_REPS = parse(Int, get(ENV, "CANOPY_AB_REPS", "9"))
 const AB_INNER = parse(Int, get(ENV, "CANOPY_AB_INNER", "5"))

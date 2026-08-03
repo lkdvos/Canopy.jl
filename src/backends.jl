@@ -29,10 +29,10 @@ partition. Fermionic signs are folded into the (tiny) transposed messages and
 the ket entry copy rather than paid as `twist!` passes over the chain links.
 
 Falls back to the pairwise kernel whenever
-`Canopy.uses_blocked_kernel(state[v])` is `false` — non-abelian or non-symmetric
-braiding, non-`Array` storage, and `Trivial` sectors (for which the pairwise path
-short-circuits to plain-array TensorOperations and one large BLAS call, which
-this cannot beat).
+`Canopy.uses_blocked_kernel(state[v])` is `false` — non-symmetric braiding,
+non-`Array` storage, more than one physical leg, and `Trivial` sectors (for which
+the pairwise path short-circuits to plain-array TensorOperations and one large
+BLAS call, which this cannot beat). Non-abelian fusion is *not* excluded.
 
 Only the vertex-batched message kernel is specialized; every other kernel simply
 uses `inner`. The single-edge `compute_message!` and the residual-driven
@@ -80,17 +80,38 @@ storage type `A`. **This is the selection rule**: the vertex-batched
 the caller has not forced a kernel with [`BlockedBackend`](@ref) /
 [`PairwiseBackend`](@ref).
 
-Requires abelian fusion (`UniqueFusion`, so every coupled sector labels exactly
-one fusion tree per uncoupled tuple and the twists are `±1`), symmetric braiding,
-and plain CPU `Array` storage. `Trivial` is excluded on purpose — see
-[`BlockedBackend`](@ref).
+Requires symmetric braiding (the fermionic-sign derivation in `src/messages.jl`
+uses `twist(σ)² = 1`, which is what `SymmetricBraiding` gives — see the note below
+on why abelian fusion is *not* required) and plain CPU `Array` storage. `Trivial`
+is excluded on purpose — see [`BlockedBackend`](@ref).
+
+**Non-abelian fusion is supported.** The gate used to require `UniqueFusion` as
+well; that was unnecessary. Every step of the blocked chain is a `TensorMap`-level
+operation that handles a general fusion style on its own — the braids and
+relayouts are `tensoradd!` with a permutation (TensorKit routes those through
+`GenericTreeTransformer`, which is the correct basis change), the absorptions and
+the closing are `mul!` / `adjoint` (composition is block-wise in the *coupled*
+sector and never mixes fusion trees), and both twists are TensorKit's own or
+provably equal to it (`_twist_message!`). No step ever has to recover all
+uncoupled sectors from one coupled label: `twist(σⱼ)` is folded onto message `j`,
+where leg `j`'s sector is manifest, and the physical factor onto the ket entry.
 
 There is deliberately **no size threshold**. Interleaved same-fixture A/B on the
 degree-3 honeycomb vertex (`benchmark/reports/backend_ab.md`) puts the blocked
-kernel ahead at every measured `(symmetry, χ)` over χ ∈ 8…128, by 1.02-2.9×, with
-a control ratio of 1.0 ± 0.022; it never loses, so there is nothing for a
-threshold to protect. Both arguments are types, so this constant-folds at any
-call site with a concrete state type.
+kernel ahead at every measured `(symmetry, χ)`, and it never loses, so there is
+nothing for a threshold to protect. The current report covers seven symmetries at
+χ ∈ {64, 128}: ratios 1.04-2.42 excluding the `Trivial` control, which itself
+lands at 0.985-1.024 and is this harness's measurement floor. Earlier runs
+extended down to χ = 8 with the same verdict.
+
+The two **non-abelian** rows are the largest ratios in the table — `fz2_su2`
+2.42× / 1.90× and `su2` 1.54× / 1.41× at χ = 64 / 128, against `fz2_u1`'s 1.23× at
+χ = 128 — because they have the smallest mean subblocks (91-122 entries against
+1365), which is the regime this formulation targets, and because the *pairwise*
+arm pays the same `GenericTreeTransformer` tax so non-abelian hands nothing back.
+
+Both arguments are types, so this constant-folds at any call site with a concrete
+state type.
 
 The tensor method additionally requires **exactly one physical leg**
 (`numout(t) == 1`). The `Layout(k)` chain addresses virtual leg `k` at tensor
@@ -105,6 +126,5 @@ uses_blocked_kernel(t::AbstractTensorMap) =
     numout(t) == 1 && uses_blocked_kernel(spacetype(t), TensorKit.storagetype(t))
 function uses_blocked_kernel(::Type{S}, ::Type{A}) where {S, A}
     I = sectortype(S)
-    return I !== Trivial && FusionStyle(I) === UniqueFusion() &&
-        BraidingStyle(I) isa SymmetricBraiding && A <: Array
+    return I !== Trivial && BraidingStyle(I) isa SymmetricBraiding && A <: Array
 end

@@ -15,7 +15,7 @@
 using Canopy: randn_state, BPMessages, belief_propagation, hexagonal_lattice
 using Canopy: SynchronousSchedule, SpanningTreeSchedule, ResidualSchedule,
     ResidualSplashSchedule, GreedySampler
-using TensorKit: ComplexSpace, Vect, Z2Irrep, U1Irrep, fℤ₂, ⊠
+using TensorKit: ComplexSpace, Vect, Z2Irrep, U1Irrep, SU2Irrep, fℤ₂, ⊠
 using TensorKit: TO
 import TensorKit
 using Graphs: cycle_graph, grid
@@ -143,6 +143,86 @@ _fz2u1_flat_virtual(χ::Int) =
 # `TensorKitTensors.FermionOperators.fermion_space(U1Irrep)` without the dep.
 const _P_FZ2U1 = _fz2u1_space((0, 1), (1, 1))
 
+# Non-abelian fixtures
+# --------------------
+# `uses_blocked_kernel` does not require abelian fusion (it never did need to —
+# see `src/backends.jl`), so the A/B has to cover `UniqueFusion() === false` too.
+# These are the *only* fixtures where a relayout pays TensorKit's
+# `GenericTreeTransformer` instead of the cached `AbelianTreeTransformer`, which is
+# the one place the blocked kernel could plausibly lose ground it holds elsewhere —
+# though the pairwise arm pays the same tax, so a tie is the expected outcome.
+#
+# They sweep the *same* "blocks multiplying" axis as `:fz2_u1`: the spin cutoff
+# grows with χ, so the sector count grows while the degeneracies stay small.
+#
+# Half-integer spins are carried as `twoj = 2j ∈ 0:tjmax`, so the sector's quantum
+# dimension is `twoj + 1` and its fermion parity is `mod(twoj, 2)` — a half-integer
+# total spin is an odd number of electrons, which is exactly the physical
+# spin/parity tie in `TensorKitTensors.HubbardOperators.hubbard_space(_, SU2Irrep)`.
+
+# Largest `twoj` that fits: every sector needs degeneracy ≥ 1, so the spins
+# `0 … tjmax/2` already cost `Σ (twoj + 1) = (tjmax+1)(tjmax+2)/2` dimensions. Grow
+# like `log2(χ)` as `:fz2_u1` does, but never past what χ can hold — at χ = 8 the
+# triangular bound binds (3 sectors, not 4) and above it `log2` does.
+function _su2_tjmax(χ::Int)
+    fits(tj) = (tj + 1) * (tj + 2) ÷ 2 ≤ χ
+    fits(1) || throw(ArgumentError("χ = $χ is too small for an SU(2) fixture"))
+    tj = min(floor(Int, log2(χ)), 1)
+    while fits(tj + 1) && tj + 1 ≤ floor(Int, log2(χ))
+        tj += 1
+    end
+    return tj
+end
+
+"""
+    _su2_degeneracies(χ, tjmax) -> Vector{Int}
+
+Degeneracies for spins `twoj/2`, `twoj ∈ 0:tjmax`, whose total *quantum* dimension
+is exactly `χ`. Every entry is `≥ 1` (as in [`_peaked_dims`](@ref), so no sector is
+silently dropped and the block count stays on the axis being swept), the surplus is
+apportioned by binomial weight in whole multiples of each sector's quantum
+dimension, and the `twoj = 0` sector — quantum dimension 1, so it can absorb any
+remainder — takes what is left over.
+"""
+function _su2_degeneracies(χ::Int, tjmax::Int)
+    qd = collect(1:(tjmax + 1))                     # quantum dim of spin twoj/2
+    n = length(qd)
+    sum(qd) ≤ χ || throw(ArgumentError("cannot fit spins 0:$tjmax//2 in χ = $χ"))
+    d = ones(Int, n)
+    surplus = χ - sum(qd)
+    w = [binomial(n - 1, i - 1) for i in 1:n]
+    tot = sum(w)
+    for i in sortperm(w; rev = true)
+        k = min(surplus, floor(Int, χ * w[i] / tot)) ÷ qd[i]
+        d[i] += k
+        surplus -= k * qd[i]
+    end
+    d[1] += surplus
+    return d
+end
+
+function _su2_virtual(χ::Int)
+    tj = _su2_tjmax(χ)
+    d = _su2_degeneracies(χ, tj)
+    return Vect[SU2Irrep](SU2Irrep(i // 2) => d[i + 1] for i in 0:tj)
+end
+
+function _fz2su2_virtual(χ::Int)
+    tj = _su2_tjmax(χ)
+    d = _su2_degeneracies(χ, tj)
+    return Vect[fℤ₂ ⊠ SU2Irrep](
+        fℤ₂(mod(i, 2)) ⊠ SU2Irrep(i // 2) => d[i + 1] for i in 0:tj
+    )
+end
+
+# Four-state physical space: the spin-SU(2) Hubbard site `|0⟩, |↑↓⟩` (even, spin 0)
+# and `|↑⟩, |↓⟩` (odd, spin ½). Shape-equivalent to
+# `TensorKitTensors.HubbardOperators.hubbard_space(Trivial, SU2Irrep)` without the
+# dep, as `_P_FZ2U1` is to `fermion_space(U1Irrep)`.
+const _P_FZ2SU2 = Vect[fℤ₂ ⊠ SU2Irrep](
+    fℤ₂(0) ⊠ SU2Irrep(0) => 2, fℤ₂(1) ⊠ SU2Irrep(1 // 2) => 1
+)
+
 # `(tag, physical_space, χ -> virtual_space)`.
 const BENCH_SPACES = (
     (:trivial, ComplexSpace(2), _trivial_virtual),
@@ -152,12 +232,21 @@ const BENCH_SPACES = (
     (:fz2_u1_flat, _P_FZ2U1, _fz2u1_flat_virtual),
 )
 
-# The spaces `report_structure.jl` censuses. Every timed space is censused, so
-# this is currently just an alias — kept as a distinct name because the census is
-# free (pure structure, no timings) and may legitimately cover spaces the suite
-# cannot afford to time. Anything added here that is *not* in `BENCH_SPACES` gets
-# no timings, so `bench_space` resolves against this tuple, not `BENCH_SPACES`.
-const CENSUS_SPACES = BENCH_SPACES
+# The spaces `report_structure.jl` censuses, and the ones `bench_space` resolves
+# against. A superset of `BENCH_SPACES`: the census is free (pure structure, no
+# timings), so it can cover spaces the timed `SUITE` cannot afford, and anything
+# here that is *not* in `BENCH_SPACES` gets no `SUITE` timings.
+#
+# The two non-abelian entries are deliberately census-only. They exist for
+# `bench_backend_ab.jl` — the *ratio* harness, which is the only place a
+# kernel-selection claim may be measured (`SUITE` cannot: see that file's header) —
+# and putting them in `BENCH_SPACES` would lengthen every `SUITE` group with fixtures
+# no `SUITE` decision reads.
+const CENSUS_SPACES = (
+    BENCH_SPACES...,
+    (:su2, Vect[SU2Irrep](SU2Irrep(0) => 1, SU2Irrep(1 // 2) => 1), _su2_virtual),
+    (:fz2_su2, _P_FZ2SU2, _fz2su2_virtual),
+)
 
 # The full χ grid every splitter is validated against.
 const BENCH_CHIS = (8, 16, 32, 64)
@@ -181,17 +270,22 @@ end
 # The two graded-U(1) entries are asserted in *opposite* directions, and that is
 # the point of having both: `:fz2_u1` must multiply its sectors as χ grows, while
 # `:fz2_u1_flat` must keep them fixed so χ only grows the degeneracies. Applying
-# the growth check to `:fz2_u1_flat` would contradict its entire purpose.
+# the growth check to `:fz2_u1_flat` would contradict its entire purpose. The two
+# `SU(2)` entries are on the multiplying axis, so they are asserted with `:fz2_u1`.
+#
+# `dim(V(χ)) == χ` is the check that matters most for the non-abelian entries: there
+# a sector contributes `degeneracy × (2j + 1)`, so an off-by-one in
+# `_su2_degeneracies` would measure at a χ it does not claim rather than fail.
 let
     for (sym, _, V) in CENSUS_SPACES
         for χ in BENCH_CHIS
             d = TensorKit.dim(V(χ))
-            d == χ || error("BENCH_SPACES[$sym]: dim(V($χ)) = $d ≠ $χ")
+            d == χ || error("CENSUS_SPACES[$sym]: dim(V($χ)) = $d ≠ $χ")
         end
         nsec = [length(collect(TensorKit.sectors(V(χ)))) for χ in BENCH_CHIS]
-        if sym === :fz2_u1
+        if sym === :fz2_u1 || sym === :su2 || sym === :fz2_su2
             (issorted(nsec) && last(nsec) > first(nsec)) ||
-                error("BENCH_SPACES[:fz2_u1]: sector count does not grow with χ ($nsec)")
+                error("CENSUS_SPACES[:$sym]: sector count does not grow with χ ($nsec)")
         elseif sym === :fz2_u1_flat
             allequal(nsec) ||
                 error("BENCH_SPACES[:fz2_u1_flat]: sector count is not fixed in χ ($nsec)")

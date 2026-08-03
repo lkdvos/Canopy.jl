@@ -5,6 +5,7 @@ using Canopy: compute_message, compute_message!, DirectedEdge, UndirectedEdge,
 using TensorKit
 using TensorKit.TO: DefaultAllocator, DefaultBackend
 using TensorKitTensors.FermionOperators: fermion_space, f_num
+using TensorKitTensors.HubbardOperators: hubbard_space
 import Bumper
 using Dictionaries
 using Graphs
@@ -29,7 +30,19 @@ using Test
 
 _state_on(g, P, V; seed) = (Random.seed!(seed); randn_state(ComplexF64, g, P, V))
 
-# As `test/test_messages.jl`, plus the production symmetry as the last row.
+# As `test/test_messages.jl`, plus the graded and non-abelian rows.
+#
+# The two `SU2Irrep` rows are the **non-abelian** ones, and they are here rather
+# than in the fallback testset because the blocked kernel is *not* restricted to
+# abelian fusion: every step of the chain is a `TensorMap`-level operation
+# (`tensoradd!` permutes, `mul!`, `adjoint`, `twist!`) that handles a general
+# fusion style on its own, and the sign derivation needs `twist(σ)² = 1` — i.e.
+# `SymmetricBraiding` — not `UniqueFusion`. See [`uses_blocked_kernel`](@ref).
+# `hubbard_space(Trivial, SU2Irrep)` is the spin-SU(2) Hubbard physical space, so the
+# row covers a physically meaningful space and not only the fusion style. Note it is
+# *not* currently reachable from `scripts/hubbard_quench`, which rejects SU(2) in
+# `sectortypes` because `product_state` handles abelian sectors only — so this file is
+# the only place the non-abelian path is exercised at all.
 const _MSG_SPACES = (
     ("bosonic", ComplexSpace(2), ComplexSpace(3)),
     ("U(1)", Vect[U1Irrep](0 => 1, 1 => 1), Vect[U1Irrep](-1 => 1, 0 => 2, 1 => 1)),
@@ -37,6 +50,11 @@ const _MSG_SPACES = (
     (
         "fZ2xU1", fermion_space(U1Irrep),
         Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => 2, (1, 1) => 1, (1, -1) => 1, (0, 2) => 1),
+    ),
+    ("SU(2)", Vect[SU2Irrep](0 => 1, 1 // 2 => 1), Vect[SU2Irrep](0 => 2, 1 // 2 => 1)),
+    (
+        "fZ2xSU2", hubbard_space(Trivial, SU2Irrep),
+        Vect[fℤ₂ ⊠ SU2Irrep]((0, 0) => 2, (1, 1 // 2) => 1, (0, 1) => 1),
     ),
 )
 
@@ -48,6 +66,30 @@ const _MSG_GEOMETRIES = (
     ("K5", complete_graph(5)),          # degree 4, dense
     ("K6", complete_graph(6)),          # degree 5
 )
+
+# Which geometries each symmetry row sweeps. Everything sweeps everything except the
+# two non-abelian rows, which skip `K6`.
+#
+# MEASURED, and the reason this exists: adding the two `SU2Irrep` rows took this file
+# from 11m39s to 18m05s, and this trim brings it back to **15m44s**. Essentially all of
+# that is *compilation*, not fixture work — the whole warm sweep over all 6 geometries
+# × 3 graded symmetries runs in ~20 s, and the worst single fixture (`fZ2xSU2` on `K6`)
+# is 6.2 s of BP plus 2.1 s of sweep. Compilation is driven by distinct
+# `(sector type, numind)` pairs, so the only
+# trim with any leverage is dropping the one geometry that contributes an otherwise
+# unused `numind`: `K6` is the sole degree-5 (`M = 6`) fixture. Dropping *any* other
+# geometry from the non-abelian rows would save run time measured in seconds and no
+# compilation at all, because `star`/`grid`/`K5` share `M = 5` and `chain`/`cycle`
+# share `M = 3`.
+#
+# What that costs in coverage: degree 5 (an 8-step chain) is still swept for all four
+# abelian symmetries, and the non-abelian rows still reach degrees 1-4 including the
+# `d < N` padded-leg case. The blocked chain is generic in `d` — nothing in it is
+# special at 5 — so this trades a redundant arity for two thirds of the added CI time.
+# If a future change makes the chain arity-dependent, delete this and take the time.
+_msg_geometries(sname) =
+    sname in ("SU(2)", "fZ2xSU2") ?
+    filter(g -> first(g) != "K6", collect(_MSG_GEOMETRIES)) : collect(_MSG_GEOMETRIES)
 
 # `Trivial` is excluded from the blocked path on purpose: the pairwise kernel
 # short-circuits via `has_array_view` to plain-array TensorOperations and one
@@ -68,7 +110,7 @@ function _cmp_batch(msgs, state, edges)
 end
 
 @testset "blocked ≡ pairwise ≡ per-edge oracle" begin
-    for (sname, P, V) in _MSG_SPACES, (gname, g) in _MSG_GEOMETRIES
+    for (sname, P, V) in _MSG_SPACES, (gname, g) in _msg_geometries(sname)
         @testset "$sname / $gname" begin
             state = _state_on(g, P, V; seed = hash((sname, gname)))
             msgs = belief_propagation(
@@ -93,7 +135,7 @@ end
 # masks a conjugation error in `adjoint(Mt)` / `adjoint(S_k)` — and a chain
 # rewrite is exactly where those appear. Generic random messages do not.
 @testset "blocked ≡ pairwise (non-hermitian messages)" begin
-    for (sname, P, V) in _MSG_SPACES, (gname, g) in _MSG_GEOMETRIES
+    for (sname, P, V) in _MSG_SPACES, (gname, g) in _msg_geometries(sname)
         @testset "$sname / $gname" begin
             state = _state_on(g, P, V; seed = hash((sname, gname, "nh")))
             msgs = BPMessages(state)
@@ -113,10 +155,15 @@ end
 end
 
 # Reordered full span pins output ordering; the clustered middle subset exercises
-# the `extrema(target_legs)` partial chains (`kmin > 1` and `kmax < d`).
+# the `extrema(target_legs)` partial chains (`kmin > 1` and `kmax < d`). Needs degree
+# ≥ 3, so it runs on the two densest geometries — filtered through
+# `_msg_geometries`, or the non-abelian rows would pull in the `M = 6` compilation
+# here that the sweeps above skip and the trim would buy nothing.
 @testset "blocked ≡ pairwise (subset, reordered targets)" begin
     for (sname, P, V) in _MSG_SPACES,
-            (gname, g) in (("star deg 4", star_graph(5)), ("K6", complete_graph(6)))
+            (gname, g) in filter(
+                r -> first(r) in ("star deg 4", "K6"), _msg_geometries(sname)
+            )
 
         @testset "$sname / $gname" begin
             state = _state_on(g, P, V; seed = hash((sname, gname, "sub")))
@@ -207,9 +254,14 @@ end
 
 # The fallback must *fire* — asserting the predicate matters, because a silently
 # taken blocked path would otherwise pass by accident.
+#
+# `SU(2)` used to be a row here, as the *non-abelian* exclusion. It has moved to
+# `_MSG_SPACES` (i.e. to the asserted-blocked sweep) because that exclusion was
+# unnecessary; the assertion was inverted rather than dropped, so a wrong
+# selection still cannot pass silently. `Trivial` remains — that one is a
+# deliberate *performance* exclusion, not a correctness one.
 @testset "fallback for unsupported sectors" begin
     fixtures = (
-        ("SU(2)", Vect[SU2Irrep](0 => 1, 1 // 2 => 1), Vect[SU2Irrep](0 => 2, 1 // 2 => 1)),
         ("trivial", ComplexSpace(2), ComplexSpace(3)),
     )
     for (sname, P, V) in fixtures
@@ -229,6 +281,19 @@ end
                 end
             end
         end
+    end
+
+    # `numout == 1` is the one restriction that is *real*: `layout(k)` addresses
+    # virtual leg `k` at tensor slot `k + 1` and `dual_phys` reads slot 1, so a
+    # two-physical-leg (`TensorNetworkOperator`) site tensor would be contracted on
+    # the wrong slots and return wrong numbers silently. Asserted on the predicate
+    # directly — the sector type here is otherwise fully supported, so the arity is
+    # the only thing that can be rejecting it.
+    @testset "two physical legs" begin
+        P = fermion_space(U1Irrep)
+        V = Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => 2, (1, 1) => 1, (1, -1) => 1)
+        @test Canopy.uses_blocked_kernel(randn(ComplexF64, P ← V ⊗ V))
+        @test !Canopy.uses_blocked_kernel(randn(ComplexF64, P ⊗ P' ← V ⊗ V))
     end
 end
 
@@ -360,14 +425,22 @@ end
 
 @testset "DefaultBackend selects the blocked kernel" begin
     # The expected verdict is spelled out per fixture rather than derived from
-    # `_expect_blocked` (which only excludes `Trivial`): `SU2Irrep` is the
-    # non-abelian exclusion, and hard-coding `false` here is the point of the row.
-    fixtures = (
-        map(r -> (r[1], r[2], r[3], _expect_blocked(r[2])), _MSG_SPACES)...,
-        (
-            "SU(2)", Vect[SU2Irrep](0 => 1, 1 // 2 => 1),
-            Vect[SU2Irrep](0 => 2, 1 // 2 => 1), false,
-        ),
+    # `_expect_blocked` (which only excludes `Trivial`), because hard-coding it is
+    # the point: the `SU(2)` rows of `_MSG_SPACES` used to be the *non-abelian
+    # exclusion* and carried a hard-coded `false` here. They now carry a hard-coded
+    # `true`, and the fingerprint below proves the blocked path is the one that ran
+    # — an inverted assertion, not a deleted one. The `bosonic` row is the `false`
+    # one, so both verdicts are exercised here.
+    #
+    # The table is keyed by name and the key is asserted to match, so reordering or
+    # renaming a `_MSG_SPACES` row cannot silently realign the expectations.
+    expected_blocked = (
+        "bosonic" => false, "U(1)" => true, "fermionic" => true, "fZ2xU1" => true,
+        "SU(2)" => true, "fZ2xSU2" => true,
+    )
+    @test map(first, expected_blocked) == map(first, _MSG_SPACES)
+    fixtures = map(
+        ((r, ex),) -> (r[1], r[2], r[3], last(ex)), zip(_MSG_SPACES, expected_blocked)
     )
     g = star_graph(5)     # degree 4 at the centre, degree 1 at the leaves
     for (sname, P, V, expected) in fixtures

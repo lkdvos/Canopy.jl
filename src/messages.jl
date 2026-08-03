@@ -544,7 +544,8 @@ end
 # Both are diagonal in `σ`, and `σ` is invariant along either chain (messages are
 # sector-diagonal; the braids only relabel axes), so the two combine into one
 # per-`σ` scalar. Writing `Z(σ) = ∏_{ℓ : isdual(space(T, ℓ))} twist(σ_ℓ)` and
-# using `twist(σ)² = 1` (`UniqueFusion` + `SymmetricBraiding` ⇒ `twist ∈ {±1}`),
+# using `twist(σ)² = 1` (`SymmetricBraiding` ⇒ `twist ∈ {±1}`; abelian fusion is
+# *not* needed here, and `uses_blocked_kernel` does not require it),
 # the total correction for target `k` is
 #
 #     Z(σ) · twist(σₖ)^{[isdual(space(T, k+1))]}
@@ -670,7 +671,8 @@ function compute_message!(
     )
     isempty(edges) && return out
     inner = inner_backend(backend)
-    # Non-abelian / non-`Array` / `Trivial`: the pairwise kernel stays the oracle.
+    # Non-symmetric braiding / non-`Array` / `Trivial` / `numout > 1`: the pairwise
+    # kernel stays the oracle.
     uses_blocked_kernel(state[first(first(edges))]) ||
         return _pairwise_message!(out, msgs, state, edges, inner, allocator)
     return _blocked_message!(out, msgs, state, edges, inner, allocator)
