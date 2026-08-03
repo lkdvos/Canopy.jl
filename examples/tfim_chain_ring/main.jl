@@ -114,9 +114,9 @@ function run_one(
     alg = Strang(edge_coloring(keys(bond_hams)))
     circuits = Dict(dτ => trotterize(bond_hams, dτ, alg) for (dτ, _) in SCHEDULE)
 
-    # Everything above is built on the CPU. `adapt(CuArray, ·)` moves the state, the Trotter
-    # circuits and the observables to the device in one place; the top-level calls below then
-    # pick a device-matching allocator automatically (no CPU Bumper buffer on the GPU).
+    ## Everything above is built on the CPU. `adapt(CuArray, ·)` moves the state, the Trotter
+    ## circuits and the observables to the device in one place; the top-level calls below then
+    ## pick a device-matching allocator automatically (no CPU Bumper buffer on the GPU).
     if gpu
         state = adapt(CuArray, state)
         circuits = Dict(dτ => adapt(CuArray, c) for (dτ, c) in circuits)
