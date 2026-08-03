@@ -310,9 +310,8 @@ the single-edge method, neither variant mutates `msgs` nor normalises the result
 Two formulations of the same contraction are implemented: the *pairwise* one described
 above, and the `Layout(k)` *blocked* one further down this file, which has fewer copy
 passes and folds the fermionic signs into the (χ²-sized) messages. **The blocked one runs
-unconditionally** — there is no selection rule; [`PairwiseBackend`](@ref) forces the
-pairwise one, which is how the two are differentially tested against each other, and it
-documents the four conditions the old rule carried and why each was removed.
+unconditionally**; [`PairwiseBackend`](@ref) forces the pairwise one, which is how the two
+are differentially tested against each other. See `docs/src/design.md`.
 """
 function compute_message(
         msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
@@ -359,15 +358,6 @@ function _repartition(tensor, newlegs, ncod::Int, backend, allocator)
     return result
 end
 
-# Shared leave-one-out: `prefix[k]` absorbs virtual legs 1..k-1, `suffix[k]` absorbs
-# k+1..d (adjoint messages), and the closing contracts them over the physical leg and
-# every virtual leg ≠ k. Only the prefix up to the largest target and the suffix down to
-# the smallest are built, so a clustered subset costs proportionally less.
-#
-# This formulation is no longer selected in production — it is the differential-test oracle
-# and the A/B's pairwise arm, reached only through `PairwiseBackend`. See
-# `docs/src/design.md` for both formulations and `PairwiseBackend` for the four conditions
-# the old selection rule carried and why each one went.
 function compute_message!(
         out, msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
         backend = DefaultBackend(), allocator = default_allocator(state),
@@ -376,7 +366,6 @@ function compute_message!(
     return _blocked_message!(out, msgs, state, edges, inner_backend(backend), allocator)
 end
 
-# `PairwiseBackend` forces this path, whatever the selection rule would say.
 function compute_message!(
         out, msgs::BPMessages, state::TensorNetworkState,
         edges::AbstractVector{<:DirectedEdge}, backend::PairwiseBackend,
@@ -386,6 +375,12 @@ function compute_message!(
     return _pairwise_message!(out, msgs, state, edges, inner_backend(backend), allocator)
 end
 
+# Shared leave-one-out: `prefix[k]` absorbs virtual legs 1..k-1, `suffix[k]` absorbs
+# k+1..d (adjoint messages), and the closing contracts them over the physical leg and
+# every virtual leg ≠ k. Only the prefix up to the largest target and the suffix down to
+# the smallest are built, so a clustered subset costs proportionally less.
+#
+# The differential-test oracle, reached only through `PairwiseBackend`.
 function _pairwise_message!(
         out, msgs::BPMessages, state::TensorNetworkState,
         edges::AbstractVector{<:DirectedEdge}, backend, allocator,
@@ -440,13 +435,11 @@ function _pairwise_message!(
 end
 
 # BP requires **symmetric braiding**, and this is the one place that has to say so out
-# loud. Every primitive the blocked chain uses works for a general braiding style —
-# measured on `Vect[FibonacciAnyon]`: `permute`/`tensoradd!` succeeds and `mul!` succeeds —
-# but the fermionic-sign derivation folds `twist(σ)` factors using `twist(σ)² = 1`, and for
-# anyonic braiding that is false (`twist(τ) = -0.809 - 0.588im`, `twist(τ)² ≈ 0.309 +
-# 0.951im`). So without this check the kernel would run to completion and return **wrong
-# numbers silently**. The pairwise kernel is safe by accident rather than by design:
-# TensorKit's `tensorcontract!` refuses non-symmetric braiding outright.
+# loud. Every primitive the blocked chain uses succeeds under anyonic braiding, but the
+# fermionic-sign derivation folds `twist(σ)` factors using `twist(σ)² = 1`, which is false
+# there — so without this check the kernel would run to completion and return **wrong
+# numbers silently**. The pairwise kernel is safe by accident: TensorKit's
+# `tensorcontract!` refuses non-symmetric braiding outright.
 function _require_symmetric_braiding(t)
     I = sectortype(t)
     BraidingStyle(I) isa SymmetricBraiding || throw(
@@ -468,17 +461,12 @@ end
 #
 # so a relayout is a single transposition, every absorption is a composition (one `gemm`
 # per coupled sector, no repartition of the link), and the closing writes the output
-# message in its natural partition. `2d` copy passes over `dim(T)` against `~4d - 2` plus
-# `2d` `twist!` passes for pairwise.
+# message in its natural partition. Fermionic signs fold into the (chi^2-sized) transposed
+# messages and the ket entry copy instead of costing `twist!` passes over the chain links.
 #
-# Fermionic signs are folded into the (chi^2-sized) transposed messages and the ket entry
-# copy rather than paid as `twist!` passes over the chain links. **The derivation is in
-# `docs/src/design.md`** ("Fermionic signs in the blocked kernel"), together with three
-# reformulations that were measured and rejected — redistributing the twists onto the ket
-# entry, fusing each chain step's composition with its re-permutation, and transposing the
-# messages inside the chains instead of hoisting them. Each looks like an obvious
-# improvement and each is slower; read that section before changing the sign handling or
-# the chain step.
+# **Read `docs/src/design.md` before changing the sign handling or the chain step.** It
+# carries the sign derivation and three reformulations that were measured and rejected;
+# each looks like an obvious improvement and each is slower.
 
 # `twist!(mt, (1,))` for a message-shaped (`1 ← 1`) tensor, without the per-subblock
 # hashed lookup: a `1 ← 1` tensor has one fusion tree pair per coupled sector and a
@@ -506,10 +494,9 @@ end
 # The transposed messages, hoisted out of both chains: `msgt[j]` is absorbed by the ket
 # chain (`j < legmax`) and `adjoint(msgt[j])` by the bra chain (`j > legmin`). `nothing`
 # when neither chain takes a step (`d == 1`). Cost of holding them is `d` χ²-sized buffers
-# against the `≈2d` links of `dim(P)·χ^d` the chains already hold live.
-#
-# Why one tensor can be shared between the two chains, and why hoisting beats transposing
-# inside them: `docs/src/design.md`, "Measured dead ends".
+# against the `≈2d` links of `dim(P)·χ^d` the chains already hold live. Why one tensor can
+# be shared between the chains, and why hoisting beats transposing inside them:
+# `docs/src/design.md`.
 function _transposed_messages(incoming, legmin, legmax, pmsg, backend, allocator)
     d = length(incoming)
     absorbed(j) = j < legmax || j > legmin
@@ -533,7 +520,7 @@ end
 #
 # `mul!` cannot write into a differently-partitioned destination, hence the separate
 # re-permute. **Do not try to fuse them into one `tensorcontract!`** — measured 0.3-9.8%
-# slower at every point, for the reason given in `docs/src/design.md`, "Measured dead ends".
+# slower at every point; `docs/src/design.md` has the reason.
 function _blocked_step(link, mt, pid, p, backend, allocator)
     result = tensoralloc_add(scalartype(link), link, p, false, Val(true), allocator)
     cp = allocator_checkpoint!(allocator)
@@ -542,6 +529,13 @@ function _blocked_step(link, mt, pid, p, backend, allocator)
     tensoradd!(result, tmp, p, false, One(), Zero(), backend, allocator)
     allocator_reset!(allocator, cp)
     return result
+end
+
+# `T` relaid out into `Layout(k)` — the entry link of either chain.
+function _chain_entry(T, p, backend, allocator)
+    link = tensoralloc_add(scalartype(T), T, p, false, Val(true), allocator)
+    tensoradd!(link, T, p, false, One(), Zero(), backend, allocator)
+    return link
 end
 
 function _blocked_message!(
@@ -565,17 +559,12 @@ function _blocked_message!(
     #
     # Virtual leg `k` sits at tensor slot `np + k`, and a `Layout` has `M - 1` codomain
     # axes and one domain axis whatever `np` is, so only the slot arithmetic depends on
-    # the physical arity. In `Layout(k)`'s own axis order the leg that a chain step moves
-    # into the domain is at position `np + k` for both chains: on the ket side the legs
-    # before `k + 1` skip `k`, and on the bra side (source `Layout(k+1)`) nothing before
-    # `k` is skipped.
+    # the physical arity. In `Layout(k)`'s own axis order the leg a chain step moves into
+    # the domain is at position `np + k` for both chains: on the ket side the legs before
+    # `k + 1` skip `k`, and on the bra side (source `Layout(k+1)`) nothing before `k` is.
     #
-    # `np > 1` is **not exercised**: `StateTensor` is `TensorMap{T, S, 1, N, A}`, so a
-    # `TensorNetworkState` has exactly one physical leg, and a `TensorNetworkOperator`
-    # reaches BP through the fused view of `TensorNetworkState(op)`, which is also
-    # `numout == 1`. The arity is threaded through anyway so the kernel carries no
-    # single-physical-leg assumption; treat the `np > 1` path as unverified until
-    # something can supply such a tensor.
+    # `np > 1` is threaded through but **not exercised** — nothing can currently supply a
+    # two-physical-leg tensor. See `docs/src/design.md`, "Physical arity".
     allinds = ntuple(identity, M)
     layout(k) = (TupleTools.deleteat(allinds, np + k), (np + k,))   # Layout(k)
     pid = (ntuple(identity, M - 1), (M,))                          # a layout's own partition
@@ -593,10 +582,9 @@ function _blocked_message!(
     msgt = _transposed_messages(incoming, legmin, legmax, pmsg, backend, allocator)
 
     # ket chain, `Layout(1)` up to `Layout(legmax)`: `ket[k]` has messages 1 … k-1
-    # absorbed. The link type is read off the first link, so the container is
-    # concrete and GPU-portable.
-    ket1 = tensoralloc_add(scalartype(T), T, layout(1), false, Val(true), allocator)
-    tensoradd!(ket1, T, layout(1), false, One(), Zero(), backend, allocator)
+    # absorbed. Both chains share a link type, read off the first entry so the
+    # containers are concrete and GPU-portable.
+    ket1 = _chain_entry(T, layout(1), backend, allocator)
     isempty(dual_phys) || twist!(ket1, dual_phys)   # the physical legs' `Z` factor
     ket = Vector{typeof(ket1)}(undef, d)
     ket[1] = ket1
@@ -606,10 +594,8 @@ function _blocked_message!(
 
     # bra chain, `Layout(d)` down to `Layout(legmin)`: `bra[k]` has messages
     # k+1 … d absorbed, as adjoints — conjugated by the closing.
-    brad = tensoralloc_add(scalartype(T), T, layout(d), false, Val(true), allocator)
-    tensoradd!(brad, T, layout(d), false, One(), Zero(), backend, allocator)
-    bra = Vector{typeof(brad)}(undef, d)
-    bra[d] = brad
+    bra = Vector{typeof(ket1)}(undef, d)
+    bra[d] = _chain_entry(T, layout(d), backend, allocator)
     for k in (d - 1):-1:legmin
         bra[k] = _blocked_step(
             bra[k + 1], adjoint(msgt[k + 1]), pid, pswap(np + k), backend, allocator

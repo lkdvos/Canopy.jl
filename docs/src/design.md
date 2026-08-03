@@ -226,21 +226,35 @@ simply closes its second physical leg against its own adjoint inside the same `n
 
 All messages leaving a vertex `v` close `state[v]` against `state[v]'` with the same
 incoming messages absorbed leave-one-out, so they share work. Two formulations of that
-contraction live in `src/messages.jl`, and an ordinary backend selects between them
-**The blocked one runs unconditionally** — there is no selection rule. `PairwiseBackend`
-forces the oracle, which is how the two are differentially tested against each other.
+contraction live in `src/messages.jl`. **The blocked one runs unconditionally** — there is
+no selection rule; [`Canopy.PairwiseBackend`](@ref) forces the other, which is how the two
+are differentially tested against each other.
 
 **Pairwise.** A ket prefix chain and a bra suffix chain, so each incoming message is
 absorbed about twice in total rather than once per output. Only the prefix up to the largest
 target and the suffix down to the smallest are built, so a clustered subset of targets costs
-proportionally less. This is the differential-test oracle and nothing else: it is no longer
-reached in production at all. The selection rule it used to share with the blocked kernel
-carried four conditions, every one of which was removed — three by measuring an argument
-that had only been asserted — and [`Canopy.PairwiseBackend`](@ref) records each and why.
-The last to go was `A <: Array`, so **GPU storage now takes the blocked kernel with no GPU
-test anywhere in the suite**: no known defect, but unverified, and the CPU A/B does not
-transfer automatically because blocked trades one fused contraction per chain step for a
-composition plus a relayout, and each composition is one gemm per coupled sector.
+proportionally less. This is now the differential-test oracle and nothing else.
+
+The rule that used to choose between the two carried four conditions, all since removed —
+three of them by measuring an argument that had only been asserted:
+
+- **abelian fusion** (`UniqueFusion`) — never needed. Every chain step is a `TensorMap`-level
+  operation that handles a general fusion style itself, and the sign derivation below needs
+  `SymmetricBraiding`, not unique fusion. Non-abelian is in fact where blocked wins *most*
+  (`fz2_su2` 2.30×, `su2` 1.58× at χ = 64).
+- **`I !== Trivial`** — justified by the claim that the `has_array_view` short-circuit to
+  plain-array TensorOperations could not be beaten. Measured, it loses anyway; see the copy
+  accounting below.
+- **`numout(t) == 1`** — the chain now threads `numout(T)` through its slot arithmetic. See
+  "Physical arity".
+- **`A <: Array`** — removed deliberately, and this is the one to know about: **GPU storage
+  now takes the blocked kernel and there is no GPU test anywhere.** The kernel is
+  storage-generic and `default_allocator` already routes non-`Array` storage away from the
+  CPU Bumper buffer, so there is no *known* defect — but neither formulation has ever run on
+  a GPU, and the CPU A/B does not transfer automatically: blocked issues two operations per
+  chain step where pairwise issues one fused contraction, and each `mul!` is one gemm per
+  coupled sector, so on a device where launch overhead dominates the graded fixtures could
+  invert.
 
 Non-symmetric braiding is **not** a fallback case: it is rejected outright, because belief
 propagation cannot support it in either formulation. Every primitive the blocked chain uses
@@ -367,9 +381,29 @@ not merely to rounding — for all four duality patterns of a `1 ← 1` message,
 messages are sector-diagonal so both indices carry the same sector and the twist is the same
 real `±1` either way.
 
-Quantitative results, the fixtures behind them, and the threading work built on this kernel
-live in `benchmark/reports/` — `backend_ab.md` for the blocked-vs-pairwise ratios,
-`subblock_probe.md` for the threading verdict and its implementation brief.
+Quantitative results and the fixtures behind them live in `benchmark/reports/` —
+`backend_ab.md` for the blocked-vs-pairwise ratios, `structure.md` for the block census.
+
+### Parallelism, measured but not taken
+
+Three routes past the serial kernel were prototyped and timed. None is implemented; the
+probes were removed once they had answered their question, so re-measuring means writing
+them again.
+
+- **Threading the coupled-sector loop inside one `mul!`** — no. The chain is sequential, so
+  only the 2-15 blocks of a single `mul!` are concurrent: 1.33× at χ = 128 and a regression
+  below, against 1.26× from `TensorKit.set_num_transformer_threads` for no code at all.
+- **A message plan cache**, hoisting TensorKit's ~70 global-LRU structure lookups per vertex
+  call above the call — no. A *perfect* cache (a bitwise-identical hand-rolled prototype) is
+  worth 1.33-1.93× at χ = 8, ≤1.08× at χ ≥ 32, and is **negative** at χ ≥ 64, where it loses
+  the real kernel's single-arena locality. Only worth revisiting if small-χ workloads matter.
+- **An outer loop over symmetry subblocks**, each handed to the whole kernel with per-thread
+  output messages summed at the end — this one *works*: 4.4-5.5× on the message kernel at
+  χ = 128, 8 threads, `fz2_u1`, honeycomb degree 3. Concurrency is the fusion-tree count
+  (337 units at χ = 128) rather than the coupled-sector count, and the closing is additive
+  into `out`, so a reduction replaces the impossible output partitioning. It is unbuilt
+  because it needs a hard dependency on TensorKit block-layout internals, and it is a loss
+  below χ = 64, so it would need a size guard.
 
 ## Open questions / future work
 

@@ -298,16 +298,12 @@ end
 # quantity the synchronous schedule reports, and a half-step measure would be
 # systematically optimistic. Pins the `last_used` start-of-iteration snapshot.
 @testset "spanning-tree residuals are the full-step change" begin
-    # The full coordination sweep on the bosonic spaces, plus the graded spaces on
-    # the geometries whose degrees the testsets above have already specialized the
-    # kernel for. (Every new `(sectortype, degree)` pair costs 10-30 s of
-    # compilation here, and the property under test does not depend on either.)
-    cases = (
-        ((sname, P, V), (gname, g)) for (sname, P, V) in _MSG_SPACES
-            for (gname, g) in _MSG_GEOMETRIES
-                if sname == "bosonic" || gname in ("3x3 grid", "K5", "cycle L=6")
-    )
-    for ((sname, P, V), (gname, g)) in cases
+    # The full coordination sweep on the bosonic spaces, plus the graded spaces on the
+    # geometries the testsets above have already specialized the kernel for. Every new
+    # `(sectortype, degree)` pair costs 10-30 s of compilation here and the property under
+    # test depends on neither.
+    for (sname, P, V) in _MSG_SPACES, (gname, g) in _MSG_GEOMETRIES
+        sname == "bosonic" || gname in ("3x3 grid", "K5", "cycle L=6") || continue
         @testset "$sname / $gname" begin
             state = _state_on(g, P, V; seed = hash((sname, gname, "res")))
             problem, alg, bp_state = bp_setup(state; schedule = SpanningTreeSchedule())

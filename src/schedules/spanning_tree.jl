@@ -18,29 +18,24 @@ Messages are updated **in place**: the [`BPMessages`](@ref) returned by
 
 # Performance trade-off
 
-An iteration performs `3|E|` directed message updates against `2|E|` for a
-per-edge schedule, but shares each vertex's absorptions across its whole outgoing
-batch, so the cost *per update* falls roughly like `d` for coordination `d`. The
-two effects cut in opposite directions and the crossover is around `d = 3`:
+An iteration performs `3|E|` directed updates against `2|E|` for a per-edge
+schedule, but shares each vertex's absorptions across its whole outgoing batch, so
+the cost *per update* falls roughly like the coordination `d`. The two effects cut
+opposite ways, crossing over around `d = 3`:
 
   * **high coordination — a large win.** On a graded honeycomb (`d = 3`,
-    `fℤ₂ ⊠ U1Irrep`, χ = 32) this needs ~4× fewer iterations than
-    [`SynchronousSchedule`](@ref) *and* a ~2.5× cheaper sweep, for a ~3× lower
-    time-to-tolerance than the per-edge spanning-tree schedule it replaced.
-  * **low coordination — a modest loss.** On degree-2 rings and chains a
-    spanning-tree sweep already converged in a handful of iterations, so there is
-    no iteration count left to trade away and the ~1.5× heavier sweep shows up
-    directly: expect ~1.3× the time-to-tolerance. The absolute cost is small
-    (a few iterations over small tensors), which is why this is still the default.
-
-Pass `schedule = SynchronousSchedule()` if you are working exclusively with
-low-coordination lattices and want the older cost profile back.
+    `fℤ₂ ⊠ U1Irrep`, χ = 32): ~4× fewer iterations than
+    [`SynchronousSchedule`](@ref) *and* a ~2.5× cheaper sweep.
+  * **low coordination — a modest loss.** On degree-2 rings and chains a sweep
+    already converged in a handful of iterations, so there is no iteration count
+    left to trade away and the heavier sweep shows up directly: expect ~1.3× the
+    time-to-tolerance. The absolute cost is small, which is why this is still the
+    default; pass `schedule = SynchronousSchedule()` to get the older profile back.
 
 The default `rng` is seeded, so `belief_propagation` is reproducible and does not
-perturb the global RNG stream. Pass `rng = Random.default_rng()` to opt into
-globally-seeded randomization instead. Note a schedule object holds *mutable* RNG
-state, so a single instance is neither thread-safe nor reusable across
-measurements that need identical orders.
+perturb the global RNG stream; pass `rng = Random.default_rng()` to opt into
+globally-seeded randomization. A schedule object holds *mutable* RNG state, so one
+instance is neither thread-safe nor reusable across runs needing identical orders.
 """
 struct SpanningTreeSchedule{RNG} <: BPSchedule
     rng::RNG
@@ -86,11 +81,9 @@ function update_messages!(
     msgs = state.iterate
     order, pos = random_bfs_order(network, sched.rng)
 
-    # One target buffer for the whole iteration: `outgoing_edges` is a lazy
-    # generator while the batch kernel needs an `AbstractVector`.
-    targets = DirectedEdge{keytype(network)}[]
-
     # Inward pass: leaves → roots, only the messages the outward pass will read.
+    # `outgoing_edges` is a lazy generator while the batch kernel needs a vector.
+    targets = DirectedEdge{keytype(network)}[]
     for v in Iterators.reverse(order)
         empty!(targets)
         pv = pos[v]
@@ -107,12 +100,8 @@ function update_messages!(
     # happens after any inward write to the same edge, so `state.last_used` still
     # holds the start-of-iteration value when it is measured against.
     for v in order
-        empty!(targets)
-        for n in neighbors(network, v)
-            push!(targets, DirectedEdge(v, n))
-        end
         update_messages_at!(
-            msgs, network, targets, alg.backend, alg.allocator;
+            msgs, network, v, alg.backend, alg.allocator;
             residuals = state.residuals, snapshot = state.last_used, timer = alg.timer,
         )
     end
