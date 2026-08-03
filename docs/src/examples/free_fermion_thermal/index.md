@@ -229,7 +229,7 @@ main()
 Free fermions at finite temperature  L=8  Dmax=64  t=1.0  μ=0.3  dτ=0.02
   open chain (BP exact on a tree)
   ring (one loop: BP approximate)
-  max truncation error: chain 1.058e-06, ring 9.651e-07
+  max truncation error: chain 1.057e-06, ring 9.656e-07
   β       ⟨n⟩ chain    exact         ⟨n⟩ ring     exact       
   0.00    0.50000000   0.50000000    0.50000000   0.50000000  
   0.25    0.51755089   0.51824354    0.51748919   0.51817409  
@@ -248,7 +248,7 @@ Free fermions at finite temperature  L=8  Dmax=64  t=1.0  μ=0.3  dτ=0.02
   3.50    0.55612060   0.55609165    0.55012440   0.56482173  
   3.75    0.55570052   0.55571751    0.54976579   0.56728906  
   4.00    0.55537364   0.55537650    0.54951723   0.56986131  
-wrote /mnt/home/ldevos/Projects/Canopy.jl/densitymatrix/docs/src/examples/free_fermion_thermal/figs/free_fermion_thermal.svg
+wrote /mnt/home/ldevos/Projects/Canopy.jl/hubbard/docs/src/examples/free_fermion_thermal/figs/free_fermion_thermal.svg
 
 ````
 

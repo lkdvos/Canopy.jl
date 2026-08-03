@@ -308,100 +308,101 @@ Real-time free-fermion quench on a 48-site hexagonal lattice (Canopy.jl)
 dt=0.01  steps=500  (t_final=5.0)  χ=(4, 8, 16, 32)  bond=(2, 3, 1)–(3, 3, 2)
 filling = 36/48 occupied
 
-χ= 4  t=0.25  meas=-0.20909  step=0.061s (gate 0.029 / bp 0.032)  D=4
-χ= 4  t=0.50  meas=-0.46999  step=0.083s (gate 0.031 / bp 0.052)  D=4
-χ= 4  t=0.75  meas=-0.33713  step=0.107s (gate 0.031 / bp 0.076)  D=4
-χ= 4  t=1.00  meas=-0.04522  step=0.168s (gate 0.031 / bp 0.137)  D=4
-χ= 4  t=1.25  meas=-0.03061  step=0.170s (gate 0.030 / bp 0.140)  D=4
-χ= 4  t=1.50  meas=-0.25369  step=0.141s (gate 0.032 / bp 0.109)  D=4
-χ= 4  t=1.75  meas=-0.32351  step=0.165s (gate 0.029 / bp 0.135)  D=4
-χ= 4  t=2.00  meas=-0.14215  step=0.151s (gate 0.024 / bp 0.127)  D=4
-χ= 4  t=2.25  meas= 0.00314  step=0.179s (gate 0.034 / bp 0.145)  D=4
-χ= 4  t=2.50  meas=-0.04556  step=0.230s (gate 0.063 / bp 0.167)  D=4
-χ= 4  t=2.75  meas=-0.13201  step=0.235s (gate 0.037 / bp 0.198)  D=4
-χ= 4  t=3.00  meas=-0.09819  step=0.237s (gate 0.034 / bp 0.203)  D=4
-χ= 4  t=3.25  meas=-0.01264  step=0.264s (gate 0.031 / bp 0.234)  D=4
-χ= 4  t=3.50  meas= 0.00952  step=0.296s (gate 0.036 / bp 0.259)  D=4
-χ= 4  t=3.75  meas=-0.01103  step=0.277s (gate 0.030 / bp 0.246)  D=4
-χ= 4  t=4.00  meas= 0.00139  step=0.277s (gate 0.032 / bp 0.245)  D=4
-χ= 4  t=4.25  meas= 0.04083  step=0.285s (gate 0.032 / bp 0.253)  D=4
-χ= 4  t=4.50  meas= 0.05384  step=0.278s (gate 0.060 / bp 0.218)  D=4
-χ= 4  t=4.75  meas= 0.03570  step=0.279s (gate 0.031 / bp 0.248)  D=4
-χ= 4  t=5.00  meas= 0.02263  step=0.283s (gate 0.036 / bp 0.247)  D=4
-χ= 4 done — gate 32.02s, bp 85.10s total
-χ= 8  t=0.25  meas=-0.20909  step=0.087s (gate 0.067 / bp 0.020)  D=8
-χ= 8  t=0.50  meas=-0.47002  step=0.071s (gate 0.037 / bp 0.034)  D=8
-χ= 8  t=0.75  meas=-0.33799  step=0.137s (gate 0.041 / bp 0.095)  D=8
-χ= 8  t=1.00  meas=-0.05482  step=0.154s (gate 0.041 / bp 0.113)  D=8
-χ= 8  t=1.25  meas=-0.06801  step=0.127s (gate 0.041 / bp 0.087)  D=8
-χ= 8  t=1.50  meas=-0.26204  step=0.180s (gate 0.038 / bp 0.142)  D=8
-χ= 8  t=1.75  meas=-0.25985  step=0.183s (gate 0.064 / bp 0.119)  D=8
-χ= 8  t=2.00  meas=-0.09849  step=0.201s (gate 0.041 / bp 0.160)  D=8
-χ= 8  t=2.25  meas=-0.05302  step=0.243s (gate 0.076 / bp 0.167)  D=8
-χ= 8  t=2.50  meas=-0.10394  step=0.264s (gate 0.071 / bp 0.193)  D=8
-χ= 8  t=2.75  meas=-0.06890  step=0.247s (gate 0.040 / bp 0.206)  D=8
-χ= 8  t=3.00  meas= 0.00403  step=0.269s (gate 0.041 / bp 0.228)  D=8
-χ= 8  t=3.25  meas=-0.03427  step=0.319s (gate 0.067 / bp 0.252)  D=8
-χ= 8  t=3.50  meas=-0.09876  step=0.343s (gate 0.040 / bp 0.303)  D=8
-χ= 8  t=3.75  meas=-0.02830  step=0.352s (gate 0.069 / bp 0.283)  D=8
-χ= 8  t=4.00  meas= 0.09861  step=0.347s (gate 0.038 / bp 0.309)  D=8
-χ= 8  t=4.25  meas= 0.08935  step=0.349s (gate 0.037 / bp 0.312)  D=8
-χ= 8  t=4.50  meas=-0.04412  step=0.357s (gate 0.044 / bp 0.314)  D=8
-χ= 8  t=4.75  meas=-0.09758  step=0.319s (gate 0.036 / bp 0.283)  D=8
-χ= 8  t=5.00  meas= 0.00345  step=0.350s (gate 0.041 / bp 0.310)  D=8
-χ= 8 done — gate 24.36s, bp 96.89s total
-χ=16  t=0.25  meas=-0.20909  step=0.129s (gate 0.088 / bp 0.041)  D=16
-χ=16  t=0.50  meas=-0.47002  step=0.115s (gate 0.094 / bp 0.021)  D=16
-χ=16  t=0.75  meas=-0.33799  step=0.123s (gate 0.080 / bp 0.043)  D=16
-χ=16  t=1.00  meas=-0.05482  step=0.197s (gate 0.079 / bp 0.118)  D=16
-χ=16  t=1.25  meas=-0.06802  step=0.284s (gate 0.114 / bp 0.170)  D=16
-χ=16  t=1.50  meas=-0.26226  step=0.202s (gate 0.063 / bp 0.140)  D=16
-χ=16  t=1.75  meas=-0.26173  step=0.310s (gate 0.074 / bp 0.236)  D=16
-χ=16  t=2.00  meas=-0.10140  step=0.365s (gate 0.083 / bp 0.282)  D=16
-χ=16  t=2.25  meas=-0.05055  step=0.355s (gate 0.090 / bp 0.265)  D=16
-χ=16  t=2.50  meas=-0.09570  step=0.380s (gate 0.081 / bp 0.298)  D=16
-χ=16  t=2.75  meas=-0.07166  step=0.389s (gate 0.062 / bp 0.327)  D=16
-χ=16  t=3.00  meas=-0.02282  step=0.479s (gate 0.086 / bp 0.393)  D=16
-χ=16  t=3.25  meas=-0.05186  step=0.506s (gate 0.075 / bp 0.431)  D=16
-χ=16  t=3.50  meas=-0.06705  step=0.530s (gate 0.087 / bp 0.443)  D=16
-χ=16  t=3.75  meas= 0.01376  step=0.547s (gate 0.108 / bp 0.439)  D=16
-χ=16  t=4.00  meas= 0.06479  step=0.703s (gate 0.111 / bp 0.592)  D=16
-χ=16  t=4.25  meas=-0.00382  step=0.762s (gate 0.091 / bp 0.671)  D=16
-χ=16  t=4.50  meas=-0.06190  step=0.770s (gate 0.095 / bp 0.675)  D=16
-χ=16  t=4.75  meas= 0.00019  step=0.656s (gate 0.065 / bp 0.592)  D=16
-χ=16  t=5.00  meas= 0.06552  step=0.764s (gate 0.077 / bp 0.687)  D=16
-χ=16 done — gate 44.41s, bp 169.24s total
-χ=32  t=0.25  meas=-0.20909  step=0.278s (gate 0.164 / bp 0.114)  D=32
-χ=32  t=0.50  meas=-0.47002  step=0.602s (gate 0.372 / bp 0.230)  D=32
-χ=32  t=0.75  meas=-0.33799  step=0.406s (gate 0.167 / bp 0.239)  D=32
-χ=32  t=1.00  meas=-0.05482  step=0.464s (gate 0.183 / bp 0.281)  D=32
-χ=32  t=1.25  meas=-0.06802  step=0.616s (gate 0.185 / bp 0.431)  D=32
-χ=32  t=1.50  meas=-0.26227  step=0.829s (gate 0.275 / bp 0.554)  D=32
-χ=32  t=1.75  meas=-0.26172  step=0.893s (gate 0.192 / bp 0.701)  D=32
-χ=32  t=2.00  meas=-0.10130  step=1.251s (gate 0.381 / bp 0.870)  D=32
-χ=32  t=2.25  meas=-0.05030  step=1.482s (gate 0.230 / bp 1.252)  D=32
-χ=32  t=2.50  meas=-0.09579  step=1.519s (gate 0.189 / bp 1.330)  D=32
-χ=32  t=2.75  meas=-0.07238  step=1.758s (gate 0.221 / bp 1.537)  D=32
-χ=32  t=3.00  meas=-0.02291  step=1.835s (gate 0.320 / bp 1.515)  D=32
-χ=32  t=3.25  meas=-0.04890  step=2.029s (gate 0.457 / bp 1.572)  D=32
-χ=32  t=3.50  meas=-0.06387  step=2.093s (gate 0.332 / bp 1.761)  D=32
-χ=32  t=3.75  meas= 0.00950  step=2.395s (gate 0.444 / bp 1.951)  D=32
-χ=32  t=4.00  meas= 0.05583  step=2.569s (gate 0.435 / bp 2.134)  D=32
-χ=32  t=4.25  meas=-0.00035  step=3.019s (gate 0.416 / bp 2.604)  D=32
-χ=32  t=4.50  meas=-0.04208  step=3.173s (gate 0.445 / bp 2.727)  D=32
-χ=32  t=4.75  meas= 0.00251  step=3.530s (gate 0.459 / bp 3.070)  D=32
-χ=32  t=5.00  meas= 0.03193  step=3.750s (gate 0.463 / bp 3.287)  D=32
-χ=32 done — gate 162.87s, bp 653.43s total
+χ= 4  t=0.25  meas=-0.20909  step=0.058s (gate 0.042 / bp 0.017)  D=4
+χ= 4  t=0.50  meas=-0.46999  step=0.059s (gate 0.039 / bp 0.020)  D=4
+χ= 4  t=0.75  meas=-0.33713  step=0.111s (gate 0.085 / bp 0.026)  D=4
+χ= 4  t=1.00  meas=-0.04522  step=0.071s (gate 0.040 / bp 0.031)  D=4
+χ= 4  t=1.25  meas=-0.03061  step=0.073s (gate 0.041 / bp 0.032)  D=4
+χ= 4  t=1.50  meas=-0.25369  step=0.069s (gate 0.039 / bp 0.030)  D=4
+χ= 4  t=1.75  meas=-0.32351  step=0.070s (gate 0.040 / bp 0.031)  D=4
+χ= 4  t=2.00  meas=-0.14215  step=0.071s (gate 0.040 / bp 0.032)  D=4
+χ= 4  t=2.25  meas= 0.00314  step=0.076s (gate 0.040 / bp 0.036)  D=4
+χ= 4  t=2.50  meas=-0.04556  step=0.085s (gate 0.041 / bp 0.045)  D=4
+χ= 4  t=2.75  meas=-0.13201  step=0.084s (gate 0.042 / bp 0.042)  D=4
+χ= 4  t=3.00  meas=-0.09819  step=0.082s (gate 0.040 / bp 0.042)  D=4
+χ= 4  t=3.25  meas=-0.01264  step=0.087s (gate 0.040 / bp 0.046)  D=4
+χ= 4  t=3.50  meas= 0.00952  step=0.093s (gate 0.040 / bp 0.053)  D=4
+χ= 4  t=3.75  meas=-0.01103  step=0.090s (gate 0.039 / bp 0.050)  D=4
+χ= 4  t=4.00  meas= 0.00139  step=0.094s (gate 0.041 / bp 0.053)  D=4
+χ= 4  t=4.25  meas= 0.04083  step=0.099s (gate 0.040 / bp 0.059)  D=4
+χ= 4  t=4.50  meas= 0.05384  step=0.098s (gate 0.041 / bp 0.057)  D=4
+χ= 4  t=4.75  meas= 0.03570  step=0.152s (gate 0.043 / bp 0.109)  D=4
+χ= 4  t=5.00  meas= 0.02263  step=0.105s (gate 0.041 / bp 0.063)  D=4
+χ= 4 done — gate 22.46s, bp 22.82s total
+χ= 8  t=0.25  meas=-0.20909  step=0.068s (gate 0.054 / bp 0.014)  D=8
+χ= 8  t=0.50  meas=-0.47002  step=0.063s (gate 0.050 / bp 0.012)  D=8
+χ= 8  t=0.75  meas=-0.33799  step=0.126s (gate 0.100 / bp 0.026)  D=8
+χ= 8  t=1.00  meas=-0.05482  step=0.076s (gate 0.051 / bp 0.025)  D=8
+χ= 8  t=1.25  meas=-0.06801  step=0.131s (gate 0.050 / bp 0.081)  D=8
+χ= 8  t=1.50  meas=-0.26204  step=0.085s (gate 0.052 / bp 0.033)  D=8
+χ= 8  t=1.75  meas=-0.25985  step=0.087s (gate 0.054 / bp 0.033)  D=8
+χ= 8  t=2.00  meas=-0.09849  step=0.094s (gate 0.054 / bp 0.040)  D=8
+χ= 8  t=2.25  meas=-0.05302  step=0.094s (gate 0.053 / bp 0.041)  D=8
+χ= 8  t=2.50  meas=-0.10394  step=0.096s (gate 0.052 / bp 0.044)  D=8
+χ= 8  t=2.75  meas=-0.06890  step=0.151s (gate 0.056 / bp 0.096)  D=8
+χ= 8  t=3.00  meas= 0.00403  step=0.150s (gate 0.101 / bp 0.050)  D=8
+χ= 8  t=3.25  meas=-0.03427  step=0.118s (gate 0.056 / bp 0.061)  D=8
+χ= 8  t=3.50  meas=-0.09876  step=0.172s (gate 0.112 / bp 0.060)  D=8
+χ= 8  t=3.75  meas=-0.02830  step=0.119s (gate 0.053 / bp 0.066)  D=8
+χ= 8  t=4.00  meas= 0.09861  step=0.115s (gate 0.052 / bp 0.064)  D=8
+χ= 8  t=4.25  meas= 0.08935  step=0.171s (gate 0.102 / bp 0.070)  D=8
+χ= 8  t=4.50  meas=-0.04412  step=0.178s (gate 0.053 / bp 0.125)  D=8
+χ= 8  t=4.75  meas=-0.09758  step=0.176s (gate 0.101 / bp 0.076)  D=8
+χ= 8  t=5.00  meas= 0.00345  step=0.181s (gate 0.051 / bp 0.130)  D=8
+χ= 8 done — gate 30.99s, bp 26.55s total
+χ=16  t=0.25  meas=-0.20909  step=0.170s (gate 0.143 / bp 0.027)  D=16
+χ=16  t=0.50  meas=-0.47002  step=0.159s (gate 0.144 / bp 0.014)  D=16
+χ=16  t=0.75  meas=-0.33799  step=0.137s (gate 0.109 / bp 0.027)  D=16
+χ=16  t=1.00  meas=-0.05482  step=0.191s (gate 0.149 / bp 0.042)  D=16
+χ=16  t=1.25  meas=-0.06802  step=0.207s (gate 0.152 / bp 0.055)  D=16
+χ=16  t=1.50  meas=-0.26226  step=0.206s (gate 0.151 / bp 0.055)  D=16
+χ=16  t=1.75  meas=-0.26173  step=0.224s (gate 0.154 / bp 0.070)  D=16
+χ=16  t=2.00  meas=-0.10140  step=0.235s (gate 0.152 / bp 0.082)  D=16
+χ=16  t=2.25  meas=-0.05055  step=0.235s (gate 0.161 / bp 0.074)  D=16
+χ=16  t=2.50  meas=-0.09570  step=0.189s (gate 0.117 / bp 0.072)  D=16
+χ=16  t=2.75  meas=-0.07166  step=0.235s (gate 0.154 / bp 0.081)  D=16
+χ=16  t=3.00  meas=-0.02282  step=0.246s (gate 0.160 / bp 0.086)  D=16
+χ=16  t=3.25  meas=-0.05186  step=0.264s (gate 0.161 / bp 0.103)  D=16
+χ=16  t=3.50  meas=-0.06705  step=0.284s (gate 0.169 / bp 0.114)  D=16
+χ=16  t=3.75  meas= 0.01376  step=0.278s (gate 0.160 / bp 0.117)  D=16
+χ=16  t=4.00  meas= 0.06479  step=0.288s (gate 0.159 / bp 0.129)  D=16
+χ=16  t=4.25  meas=-0.00382  step=0.375s (gate 0.170 / bp 0.205)  D=16
+χ=16  t=4.50  meas=-0.06190  step=0.306s (gate 0.163 / bp 0.143)  D=16
+χ=16  t=4.75  meas= 0.00019  step=0.303s (gate 0.161 / bp 0.142)  D=16
+χ=16  t=5.00  meas= 0.06551  step=0.314s (gate 0.160 / bp 0.154)  D=16
+χ=16 done — gate 75.60s, bp 43.95s total
+χ=32  t=0.25  meas=-0.20909  step=0.558s (gate 0.460 / bp 0.098)  D=32
+χ=32  t=0.50  meas=-0.47002  step=0.877s (gate 0.678 / bp 0.200)  D=32
+χ=32  t=0.75  meas=-0.33799  step=0.642s (gate 0.547 / bp 0.095)  D=32
+χ=32  t=1.00  meas=-0.05482  step=0.713s (gate 0.519 / bp 0.194)  D=32
+χ=32  t=1.25  meas=-0.06802  step=0.758s (gate 0.518 / bp 0.240)  D=32
+χ=32  t=1.50  meas=-0.26227  step=0.820s (gate 0.538 / bp 0.282)  D=32
+χ=32  t=1.75  meas=-0.26172  step=0.836s (gate 0.556 / bp 0.280)  D=32
+χ=32  t=2.00  meas=-0.10130  step=0.952s (gate 0.538 / bp 0.414)  D=32
+χ=32  t=2.25  meas=-0.05030  step=0.862s (gate 0.494 / bp 0.368)  D=32
+χ=32  t=2.50  meas=-0.09579  step=1.120s (gate 0.608 / bp 0.512)  D=32
+χ=32  t=2.75  meas=-0.07238  step=1.014s (gate 0.552 / bp 0.462)  D=32
+χ=32  t=3.00  meas=-0.02291  step=1.482s (gate 0.926 / bp 0.556)  D=32
+χ=32  t=3.25  meas=-0.04890  step=1.216s (gate 0.632 / bp 0.584)  D=32
+χ=32  t=3.50  meas=-0.06384  step=1.187s (gate 0.596 / bp 0.591)  D=32
+χ=32  t=3.75  meas= 0.00954  step=1.250s (gate 0.606 / bp 0.644)  D=32
+χ=32  t=4.00  meas= 0.05584  step=1.327s (gate 0.613 / bp 0.714)  D=32
+χ=32  t=4.25  meas=-0.00036  step=1.444s (gate 0.638 / bp 0.805)  D=32
+χ=32  t=4.50  meas=-0.04204  step=1.619s (gate 0.838 / bp 0.780)  D=32
+χ=32  t=4.75  meas= 0.00267  step=1.519s (gate 0.625 / bp 0.893)  D=32
+χ=32  t=5.00  meas= 0.03208  step=1.541s (gate 0.628 / bp 0.912)  D=32
+χ=32 done — gate 325.55s, bp 226.74s total
 
 TimerOutputs breakdown (χ=32):
 ─────────────────────────────────
-Section   ncalls     time    %tot
+ Section  ncalls    time    %tot
 ─────────────────────────────────
-single     1.00k    8.11s    1.0%
-hop          500     155s   19.0%
-bp           500     653s   80.0%
+ single    1.00k   12.9s    2.3%
+ hop         500    313s   56.6%
+ bp          500    227s   41.1%
 ─────────────────────────────────
-wrote /mnt/home/ldevos/Projects/Canopy/main/docs/src/examples/realtime/figs/realtime_hexagonal.svg
+
+wrote /mnt/home/ldevos/Projects/Canopy.jl/hubbard/docs/src/examples/realtime/figs/realtime_hexagonal.svg
 
 ````
 

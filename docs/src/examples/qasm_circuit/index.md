@@ -485,7 +485,7 @@ TFIM quench  L=16  J=1.0  h=1.0  dt=0.1  steps=25
   4      0.051713053    2.274e-03      5.86e-02  
   8      0.049434482    5.080e-06      7.90e-03  
   16     0.049438800    1.991e-08      1.04e-04  
-  32     0.049438820    4.710e-13      3.72e-07  
+  32     0.049438820    4.797e-13      3.72e-07  
   exact  0.049438820  
 
 ````
@@ -540,7 +540,7 @@ end
 ````
 
 ````
-wrote /mnt/home/ldevos/Projects/Canopy/QASM/docs/src/examples/qasm_circuit/figs/qasm_circuit.svg
+wrote /mnt/home/ldevos/Projects/Canopy.jl/hubbard/docs/src/examples/qasm_circuit/figs/qasm_circuit.svg
 
 ````
 
