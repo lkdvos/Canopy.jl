@@ -30,9 +30,17 @@
 #   * reported statistic: `min` over `AB_REPS` repetitions of those per-rep
 #     minima — minimum is the right estimator for "how fast is this code", the
 #     upper tail is contention;
-#   * `:trivial` is the **control**. `uses_blocked_kernel` excludes `Trivial`, so
-#     both arms run byte-identical code there and its ratio is this harness's
-#     measurement floor. Quote it with every table.
+#   * every row carries its own **control**: a third timed arm that is a second copy
+#     of the blocked arm, so `control / blocked` is byte-identical code against
+#     itself and its deviation from 1.0 is that row's measurement floor. Quote it
+#     with every ratio.
+#
+#     This used to be a single `:trivial` row, on the grounds that
+#     the selection rule excluded `Trivial` and so both arms ran the same code
+#     there. That is no longer true — the `Trivial` exclusion was measured and
+#     removed — and it was the wrong design anyway: a control that depends on the
+#     selection rule silently stops being a control the moment the rule changes,
+#     and it gave one floor for the whole table rather than one per fixture.
 #
 # Correctness and allocator hygiene are checked per fixture too (the arms must
 # agree to `rtol`, the bump buffer must come back empty with no overflow), so a
@@ -54,9 +62,9 @@ using Canopy: compute_message, compute_message!, outgoing_edges,
 # (where `z2` had fallen to 1.028) and χ = 128 is the extrapolation check.
 const AB_CHIS = isempty(ARGS) ? (64, 128) : Tuple(parse(Int, a) for a in ARGS)
 
-# `:su2` / `:fz2_su2` are the non-abelian rows. `uses_blocked_kernel` does not
-# require `UniqueFusion` (see `src/backends.jl`), so they take the blocked path and
-# belong in this A/B; they are also the only rows where a relayout goes through
+# `:su2` / `:fz2_su2` are the non-abelian rows. The blocked kernel never needed
+# `UniqueFusion` (see `PairwiseBackend`), so they belong in this A/B; they are also the
+# only rows where a relayout goes through
 # TensorKit's `GenericTreeTransformer` rather than the cached
 # `AbelianTreeTransformer`. Both arms pay that, so the expectation is a tie or a
 # win, not a loss — which is exactly the claim this table has to settle.
@@ -107,6 +115,7 @@ struct ABRow
     pairwise::Float64      # µs
     blocked::Float64       # µs
     ratio::Float64         # pairwise / blocked, >1 means blocked is faster
+    control::Float64       # second blocked arm / blocked arm; the row's noise floor
     spread::Float64        # (max-min)/min over reps, of the *ratio*'s arms
     peak_p::Int            # bump-buffer high-water mark, bytes
     peak_b::Int
@@ -134,7 +143,7 @@ function ab_row(sym::Symbol, χ::Int; reps = AB_REPS, inner = AB_INNER)
 
     # Correctness first: a ratio between two arms that disagree is meaningless.
     ref_p = compute_message(msgs, state, edges, PairwiseBackend(), TO.DefaultAllocator())
-    ref_b = compute_message(msgs, state, edges, BlockedBackend(), TO.DefaultAllocator())
+    ref_b = compute_message(msgs, state, edges, TO.DefaultBackend(), TO.DefaultAllocator())
     maxdiff = maximum(
         norm(ref_b[i] - ref_p[i]) / max(norm(ref_p[i]), eps()) for i in eachindex(ref_p)
     )
@@ -152,37 +161,42 @@ function ab_row(sym::Symbol, χ::Int; reps = AB_REPS, inner = AB_INNER)
     st_p.noverflow == 0 || error("$sym χ=$χ: pairwise overflowed the buffer")
 
     Bumper.reset_buffer!(buf)
-    compute_message!(out, msgs, state, edges, BlockedBackend(), buf)
+    compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf)
     st_b = buffer_stats(buf)
     buffer_isempty(buf) || error("$sym χ=$χ: blocked left the buffer non-empty")
     st_b.noverflow == 0 || error("$sym χ=$χ: blocked overflowed the buffer")
 
     tp = Float64[]
     tb = Float64[]
+    tc = Float64[]
     for _ in 1:reps
         push!(tp, best(() -> compute_message!(out, msgs, state, edges, PairwiseBackend(), buf), inner))
-        push!(tb, best(() -> compute_message!(out, msgs, state, edges, BlockedBackend(), buf), inner))
+        push!(tb, best(() -> compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf), inner))
+        # control: the blocked arm again, so `control / blocked` is identical code
+        push!(tc, best(() -> compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf), inner))
     end
 
-    mp, mb = minimum(tp), minimum(tb)
+    mp, mb, mc = minimum(tp), minimum(tb), minimum(tc)
+    control = mc / mb
     spread = max((maximum(tp) - mp) / mp, (maximum(tb) - mb) / mb)
     ntrees = length(collect(fusiontrees(T)))
     dm = dim(space(T))
     return ABRow(
-        sym, χ, ntrees, dm, dm / ntrees, mp, mb, mp / mb, spread,
+        sym, χ, ntrees, dm, dm / ntrees, mp, mb, mp / mb, control, spread,
         st_p.peak, st_b.peak, maxdiff,
     )
 end
 
 const HEADER = (
     "sym", "chi", "ntrees", "dim", "meanblk", "pairwise_us", "blocked_us",
-    "ratio", "spread", "peak_pairwise", "peak_blocked", "maxdiff",
+    "ratio", "control", "spread", "peak_pairwise", "peak_blocked", "maxdiff",
 )
 
 _cells(r::ABRow) = (
     string(r.sym), string(r.chi), string(r.ntrees), string(r.dim),
     @sprintf("%.1f", r.meanblk), @sprintf("%.1f", r.pairwise),
     @sprintf("%.1f", r.blocked), @sprintf("%.3f", r.ratio),
+    @sprintf("%.3f", r.control),
     @sprintf("%.1f%%", 100 * r.spread), string(r.peak_p), string(r.peak_b),
     @sprintf("%.1e", r.maxdiff),
 )
@@ -226,8 +240,8 @@ function main()
         r = ab_row(sym, χ)
         push!(rows, r)
         @printf(
-            "%-13s χ=%-4d  pairwise %9.1f µs   blocked %9.1f µs   ratio %6.3f   (meanblk %.1f, ≈%.2f GB)\n",
-            r.sym, r.chi, r.pairwise, r.blocked, r.ratio, r.meanblk, gb
+            "%-13s χ=%-4d  pairwise %9.1f µs   blocked %9.1f µs   ratio %6.3f  (ctl %.3f, meanblk %.1f, ≈%.2f GB)\n",
+            r.sym, r.chi, r.pairwise, r.blocked, r.ratio, r.control, r.meanblk, gb
         )
         GC.gc()
     end
@@ -253,8 +267,9 @@ function main()
         println(io, "- $(AB_REPS) reps × $(AB_INNER) inner calls; reported time is min-over-reps of min-over-inner")
         println(io)
         println(io, "`ratio = pairwise / blocked`, so **> 1 means the blocked kernel is faster**.")
-        println(io, "`:trivial` is the control: `uses_blocked_kernel` excludes `Trivial`, so both arms")
-        println(io, "run identical code and its ratio is this harness's measurement floor.")
+        println(io, "`control` is a second blocked arm divided by the blocked arm — byte-identical")
+        println(io, "code against itself, so its distance from 1.000 is **that row's** measurement")
+        println(io, "floor. A `ratio` that does not clear its own `control` is not a result.")
         println(io, "`spread` is the worst arm's `(max - min) / min` over reps; `maxdiff` is the")
         println(io, "relative disagreement between the two arms' outputs.")
         println(io)

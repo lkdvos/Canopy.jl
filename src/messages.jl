@@ -1,49 +1,11 @@
-# --- BP message conventions ---------------------------------------------------
+# BP messages live on the *directed* graph: each undirected edge `(u, v)` carries
+# `DirectedEdge(u, v)` and `DirectedEdge(v, u)`. A directed edge `(s, r)` is read
+# `sender → receiver`; `msgs[e]` lives on the receiver's side of the bond, with space
+# `V_r ← V_r`, codomain = bra index and domain = ket index.
 #
-# Belief-propagation messages live on the *directed* version of the state's
-# graph. For every undirected edge `(u, v)` of `state` there are two directed
-# edges and two messages:
-#
-#     DirectedEdge(u, v)   "message from sender u to receiver v"
-#     DirectedEdge(v, u)   "message from sender v to receiver u"
-#
-# ## Geometry
-#
-# A directed edge `e = (s, r)` is read as `sender → receiver`. The message
-# `msgs[e]` lives on the **receiver's** side of the underlying bond, i.e. on
-# the virtual leg of `state[r]` that points to `s`. With
-# `V_r = virtualspace(state, DirectedEdge(r, s))` (the bond space as seen
-# from r), every message has TensorKit space `V_r ← V_r`.
-#
-# ## Codomain / domain
-#
-# Treating a message as a linear map `V_r → V_r`:
-#
-# - the **domain** (ket-layer) leg contracts against the ket virtual leg of
-#   `state[r]` at this bond — this is what [`attach_messages`](@ref) does;
-# - the **codomain** (bra-layer) leg takes the place of that ket virtual
-#   leg in the modified site tensor, so a subsequent contraction with the
-#   bra `state[r]'` closes the BP environment.
-#
-# In the double-layer picture, a message is the partial trace of the
-# environment outside the receiver projected onto the bond: codomain = bra
-# index, domain = ket index. On a tree the BP fixed point coincides with
-# this exact environment; on graphs with loops it is the loop-free
-# (Bethe) approximation.
-#
-# ## Normalization
-#
-# Messages are defined up to overall scale (BP only constrains them up to a
-# multiplicative constant per directed edge). The convention used here is
-# trace normalization: [`compute_message`](@ref) returns the new message
-# normalized by its trace, and [`tr_distance`](@ref) compares two messages
-# after trace-normalising both — i.e. it ignores any overall rescaling.
-#
-# ## Identity initialization
-#
-# `BPMessages(state)` initialises every message to the identity on its
-# receiver-side space. This is the natural starting point for BP and is
-# *exact* on trees: a single sweep along the tree reaches the fixed point.
+# The geometric convention, its double-layer meaning, the trace-normalization
+# convention and the two `compute_message!` formulations are documented in
+# `docs/src/design.md` ("BP messages" and "The vertex-batched message kernel").
 
 const MessageTensor{T <: Number, S <: IndexSpace, A <: DenseVector{T}} =
     TensorMap{T, S, 1, 1, A}
@@ -56,10 +18,8 @@ keys of type `V`. Each undirected state edge contributes two entries — one
 per direction — stored in a `Dictionary` keyed by `DirectedEdge{V}`.
 
 Every message is a `TensorMap{T, S, 1, 1, A}` of space `V_r ← V_r`, where
-`V_r` is the virtual-leg space of the *receiver* at that bond. See the
-file header for the geometric convention (sender → receiver, codomain =
-bra, domain = ket) used by [`attach_messages`](@ref) and
-[`compute_message`](@ref).
+`V_r` is the virtual-leg space of the *receiver* at that bond, with codomain =
+bra index and domain = ket index.
 """
 struct BPMessages{T <: Number, S <: IndexSpace, A <: DenseVector{T}, V}
     messages::Dictionary{DirectedEdge{V}, MessageTensor{T, S, A}}
@@ -72,8 +32,7 @@ Allocate a `BPMessages` for `state` with every directed edge initialized to
 the identity on the receiver's side of the underlying undirected edge.
 
 This is the standard BP starting point and is *exact* on trees (one sweep
-reaches the fixed point). See the file header for the message-space
-convention.
+reaches the fixed point).
 """
 function BPMessages(state::TensorNetworkState)
     K = DirectedEdge{keytype(state)}
@@ -129,8 +88,7 @@ Return `true` if `messages` is structurally compatible with `state`:
 
 - every undirected edge of `state` has both directed messages present;
 - each message has space `V_r ← V_r`, where `V_r` is the virtual-leg
-  space of the receiver (`last(edge)`) at that bond — i.e. the messages
-  follow the sender→receiver convention documented at the top of this file.
+  space of the receiver (`last(edge)`) at that bond.
 
 Does not check that the messages are a BP fixed point; only that their
 spaces line up with `state`.
@@ -349,15 +307,12 @@ requested targets are built, so a small subset costs proportionally less. Like
 the single-edge method, neither variant mutates `msgs` nor normalises the result;
 `compute_message` allocates the output vector, `compute_message!` fills `out`.
 
-Two formulations of the same contraction are implemented: the *pairwise* one
-described above, and the `Layout(k)` *blocked* one further down this file, which
-has fewer copy passes and folds the fermionic signs into the (χ²-sized) messages.
-An ordinary `backend` (e.g. the default `DefaultBackend()`) **selects between
-them automatically**, on `Canopy.uses_blocked_kernel(state[v])` — see
-[`BlockedBackend`](@ref) for what that predicate covers and why `Trivial` is
-excluded. [`BlockedBackend`](@ref) and [`PairwiseBackend`](@ref) override the
-choice and force their respective kernels, which is how the two are
-differentially tested against each other.
+Two formulations of the same contraction are implemented: the *pairwise* one described
+above, and the `Layout(k)` *blocked* one further down this file, which has fewer copy
+passes and folds the fermionic signs into the (χ²-sized) messages. **The blocked one runs
+unconditionally** — there is no selection rule; [`PairwiseBackend`](@ref) forces the
+pairwise one, which is how the two are differentially tested against each other, and it
+documents the four conditions the old rule carried and why each was removed.
 """
 function compute_message(
         msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
@@ -404,40 +359,21 @@ function _repartition(tensor, newlegs, ncod::Int, backend, allocator)
     return result
 end
 
-# Shared leave-one-out: `prefix[k]` absorbs virtual legs 1..k-1, `suffix[k]`
-# absorbs k+1..d (adjoint messages), and the closing contracts them over the
-# physical leg and every virtual leg ≠ k — the `compute_message!` sandwich. Links
-# are pre-partitioned so each closing is a direct block GEMM with no repartition,
-# and bump-allocated under one checkpoint freed at the end. Only the prefix up to
-# the largest target and the suffix down to the smallest are built, so a clustered
-# subset costs proportionally less than all `d` outputs.
+# Shared leave-one-out: `prefix[k]` absorbs virtual legs 1..k-1, `suffix[k]` absorbs
+# k+1..d (adjoint messages), and the closing contracts them over the physical leg and
+# every virtual leg ≠ k. Only the prefix up to the largest target and the suffix down to
+# the smallest are built, so a clustered subset costs proportionally less.
 #
-# Kernel selection lives here. An ordinary backend takes the blocked
-# (`Layout(k)`) kernel whenever `uses_blocked_kernel` holds and this pairwise one
-# otherwise; the two selector backends force their own path regardless.
-# `uses_blocked_kernel` is a pure function of the source tensor's space and
-# storage *types*, so the branch is constant-folded at any call site whose state
-# type is concrete.
-#
-# MEASURED, and the reason the predicate carries no size threshold: on the
-# degree-3 honeycomb vertex, interleaved same-fixture A/B, the blocked kernel is
-# never slower at any measured (symmetry, χ) — see
-# `benchmark/reports/backend_ab.md`, and `benchmark/bench_backend_ab.jl` for why
-# a `SUITE` group cannot be used to re-measure this. `Trivial` is excluded inside
-# `uses_blocked_kernel` itself: it is the one case where the pairwise path has a
-# structural advantage, short-circuiting via `has_array_view` to plain-array
-# TensorOperations and one large BLAS call.
+# This formulation is no longer selected in production — it is the differential-test oracle
+# and the A/B's pairwise arm, reached only through `PairwiseBackend`. See
+# `docs/src/design.md` for both formulations and `PairwiseBackend` for the four conditions
+# the old selection rule carried and why each one went.
 function compute_message!(
         out, msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
     isempty(edges) && return out
-    inner = inner_backend(backend)
-    return if uses_blocked_kernel(state[first(first(edges))])
-        _blocked_message!(out, msgs, state, edges, inner, allocator)
-    else
-        _pairwise_message!(out, msgs, state, edges, inner, allocator)
-    end
+    return _blocked_message!(out, msgs, state, edges, inner_backend(backend), allocator)
 end
 
 # `PairwiseBackend` forces this path, whatever the selection rule would say.
@@ -503,79 +439,52 @@ function _pairwise_message!(
     return out
 end
 
+# BP requires **symmetric braiding**, and this is the one place that has to say so out
+# loud. Every primitive the blocked chain uses works for a general braiding style —
+# measured on `Vect[FibonacciAnyon]`: `permute`/`tensoradd!` succeeds and `mul!` succeeds —
+# but the fermionic-sign derivation folds `twist(σ)` factors using `twist(σ)² = 1`, and for
+# anyonic braiding that is false (`twist(τ) = -0.809 - 0.588im`, `twist(τ)² ≈ 0.309 +
+# 0.951im`). So without this check the kernel would run to completion and return **wrong
+# numbers silently**. The pairwise kernel is safe by accident rather than by design:
+# TensorKit's `tensorcontract!` refuses non-symmetric braiding outright.
+function _require_symmetric_braiding(t)
+    I = sectortype(t)
+    BraidingStyle(I) isa SymmetricBraiding || throw(
+        SectorMismatch(
+            lazy"belief propagation requires symmetric braiding, got $(BraidingStyle(I)) \
+                 for sector type $I: the message kernel's fermionic-sign derivation uses \
+                 twist(σ)² = 1, which only holds for symmetric braiding"
+        )
+    )
+    return nothing
+end
+
 # --- blocked (`Layout(k)`) vertex-batched kernel -------------------------------
 #
-# Same mathematics as the pairwise kernel above, one *single* layout family for
-# both chains, with the target leg alone in the **domain**:
+# Same mathematics as the pairwise kernel above, one layout family for both chains with
+# the target leg alone in the domain:
 #
-#     Layout(k) = (phys, ℓ₁ … ℓ̂ₖ … ℓ_N) ← (ℓₖ)
+#     Layout(k) = (phys, l1 ... lk-hat ... lN) <- (lk)
 #
-# (`suffix_legs(k)` with `ncod = M - 1`, i.e. the pairwise *bra* chain's family —
-# the ket chain's `prefix_legs` family is the one that goes away.) Consequences:
+# so a relayout is a single transposition, every absorption is a composition (one `gemm`
+# per coupled sector, no repartition of the link), and the closing writes the output
+# message in its natural partition. `2d` copy passes over `dim(T)` against `~4d - 2` plus
+# `2d` `twist!` passes for pairwise.
 #
-#  1. `Layout(k) → Layout(k±1)` is the single transposition of axes `k+1` and `M`,
-#     one copy-kernel shape for both chains and every step;
-#  2. the absorbed leg is always the sole domain leg, so every absorption is a
-#     composition — one `gemm` per coupled sector, and no repartition of the link
-#     (the pairwise ket chain pays a full `dim(T)` copy per step for it);
-#  3. the closing `adjoint(S_k) * P_k` is one `gemm('C', 'N')` per coupled sector
-#     writing `out[i]` in its **natural** partition, removing both the `copyC`
-#     repartition and the `twist!` copy of the link the pairwise closing forces.
-#
-# Copy passes over `dim(T)`: `2d` (two entry braids plus one per chain step),
-# against ~`4d - 2` plus `2d` `twist!` passes on the pairwise path.
-#
-# ## Fermionic signs
-#
-# `blas_contract!` (`TensorKit/src/tensors/tensoroperations.jl:392-460`) is
-# "permute `A` to `pA`, permute `B` to `pB`, compose, and apply `twist(σ_ℓ)` once
-# per contracted leg pair that is **dual on the `B` side**". `*` / `mul!` is the
-# bare composition, so a contraction written with `mul!` here is short exactly
-# that factor. With `σ_ℓ` the sector on leg `ℓ` of `T` (`ℓ = 1` physical,
-# `ℓ = j + 1` virtual leg `j`):
-#
-#   * absorption of message `j` (`A` = link, `B` = message, `cindB = (2,)`, and
-#     `space(msg, 2) == dual(space(T, j + 1))`): missing factor `twist(σⱼ)` iff
-#     `!isdual(space(T, j + 1))`;
-#   * closing at target `k` (`A = adjoint(S_k)`, `B = P_k`, `cindB` = `P_k`'s
-#     codomain = every leg but `k + 1`): missing factor
-#     `∏_{ℓ ≠ k+1, isdual(space(T, ℓ))} twist(σ_ℓ)`.
-#
-# Both are diagonal in `σ`, and `σ` is invariant along either chain (messages are
-# sector-diagonal; the braids only relabel axes), so the two combine into one
-# per-`σ` scalar. Writing `Z(σ) = ∏_{ℓ : isdual(space(T, ℓ))} twist(σ_ℓ)` and
-# using `twist(σ)² = 1` (`SymmetricBraiding` ⇒ `twist ∈ {±1}`; abelian fusion is
-# *not* needed here, and `uses_blocked_kernel` does not require it),
-# the total correction for target `k` is
-#
-#     Z(σ) · twist(σₖ)^{[isdual(space(T, k+1))]}
-#         = twist(σ_phys)^{[isdual(space(T, 1))]} · ∏_{j ≠ k} twist(σⱼ) .
-#
-# Every leg `j ≠ k` is absorbed exactly once for target `k` (ket chain if `j < k`,
-# bra chain if `j > k`), so `twist(σⱼ)` folds into the **transposed message** (a χ²
-# pass, in `_transposed_message`) and the only remainder is the physical leg,
-# folded into the ket entry copy when the physical space is dual. Padded legs
-# carry the unit sector (`twist(unit) == 1`) and drop out. Net: no `twist!` pass
-# over any chain link and none on the output.
-#
-# The literal reading of the two bullets — fold all of `Z` into the ket entry,
-# twist message `j` only when `!isdual(space(T, j+1))`, and finish with
-# `twist!(out[i], (1,))` when `isdual(space(T, k+1))` — is the same scalar
-# distributed differently, and was checked to agree numerically; it costs one
-# extra `dim(T)`-sized pass, which is why the factors live on the messages here.
+# Fermionic signs are folded into the (chi^2-sized) transposed messages and the ket entry
+# copy rather than paid as `twist!` passes over the chain links. **The derivation is in
+# `docs/src/design.md`** ("Fermionic signs in the blocked kernel"), together with three
+# reformulations that were measured and rejected — redistributing the twists onto the ket
+# entry, fusing each chain step's composition with its re-permutation, and transposing the
+# messages inside the chains instead of hoisting them. Each looks like an obvious
+# improvement and each is slower; read that section before changing the sign handling or
+# the chain step.
 
-# `twist!(mt, (1,))` for a message-shaped (`1 ← 1`) tensor, without the
-# per-subblock hashed lookup.
-#
-# `TensorKit.twist!` walks `fusiontrees(t)` and reaches each subblock through
-# `t[f₁, f₂]`. That `getindex` is not just a `Dictionary` `gettoken`: `subblock`
-# rebuilds a whole `subblockstructure` `Dictionary` per call, and each rebuild
-# takes two `GlobalLRUCache` lookups (`sectorstructure` and `degeneracystructure`,
-# one `SpinLock` each, taken on hits too). A `1 ← 1` tensor has exactly one
-# fusion tree pair per coupled sector and a single-leg tree's uncoupled sector
-# *is* its coupled one, so scaling `blocks(mt)` by `twist(c)` is the same
-# operation with one structure lookup for the whole tensor instead of one pair
-# per sector.
+# `twist!(mt, (1,))` for a message-shaped (`1 ← 1`) tensor, without the per-subblock
+# hashed lookup: a `1 ← 1` tensor has one fusion tree pair per coupled sector and a
+# single-leg tree's uncoupled sector *is* its coupled one, so scaling `blocks(mt)` by
+# `twist(c)` is the same operation with one structure lookup for the whole tensor rather
+# than the two `GlobalLRUCache` lookups `t[f₁, f₂]` costs per sector.
 function _twist_message!(mt)
     for (c, b) in blocks(mt)
         θ = twist(c)
@@ -594,29 +503,13 @@ function _transposed_message(msg, pmsg, backend, allocator)
     return _twist_message!(mt)
 end
 
-# The transposed messages, hoisted out of both chains: `msgt[j]` is absorbed by
-# the ket chain (`j < legmax`) and `adjoint(msgt[j])` by the bra chain
-# (`j > legmin`), so every leg but the lone target of a single-target call is
-# built here. `nothing` when neither chain takes a step (`d == 1`).
+# The transposed messages, hoisted out of both chains: `msgt[j]` is absorbed by the ket
+# chain (`j < legmax`) and `adjoint(msgt[j])` by the bra chain (`j > legmin`). `nothing`
+# when neither chain takes a step (`d == 1`). Cost of holding them is `d` χ²-sized buffers
+# against the `≈2d` links of `dim(P)·χ^d` the chains already hold live.
 #
-# Sharing one tensor between the chains rests on
-#
-#     twist(permute(m', pmsg), 1) == adjoint(twist(permute(m, pmsg), 1))
-#
-# which holds exactly (not just to rounding) for all four duality patterns of a
-# `1 ← 1` message: messages are sector-diagonal, so both indices carry the same
-# sector and the twist is the same real `±1` either way.
-#
-# It matters because `tensoradd!` *from* an `AdjointTensorMap` — what the bra
-# chain used to transpose — misses TensorKit's flat-data `add_transform_kernel!`
-# and falls back to the generic one, which reaches both operands through
-# `t[f₁, f₂]` once per fusion tree. Hoisting also transposes a leg absorbed by
-# both chains once instead of twice (`d` transposes rather than `2d - 2` when
-# every outgoing edge is a target).
-#
-# Cost of holding them: `d` χ²-sized buffers for the duration of the call,
-# against the `≈ 2d` links of `dim(space(T)) = dim(P) · χ^d` the chains already
-# hold live.
+# Why one tensor can be shared between the two chains, and why hoisting beats transposing
+# inside them: `docs/src/design.md`, "Measured dead ends".
 function _transposed_messages(incoming, legmin, legmax, pmsg, backend, allocator)
     d = length(incoming)
     absorbed(j) = j < legmax || j > legmin
@@ -632,28 +525,15 @@ function _transposed_messages(incoming, legmin, legmax, pmsg, backend, allocator
     return msgt
 end
 
-# One chain step: absorb the composable message `mt` (or its adjoint, on the bra
-# chain) into the sole domain leg of the `Layout` link `link` and re-emit in the
-# neighbouring layout, `p` being the axis transposition.
+# One chain step: absorb the composable message `mt` (or its adjoint, on the bra chain)
+# into the sole domain leg of the `Layout` link and re-emit in the neighbouring layout, `p`
+# being the axis transposition. One `gemm` per coupled sector with no copy of `link` (`pid`
+# is `link`'s own partition and only sizes the output buffer); `tmp` is taken above a
+# checkpoint and released before returning, so only the chain links stay live.
 #
-# The composition is one `gemm` per coupled sector with no copy of `link` (`pid`
-# is `link`'s own partition and only sizes the output buffer), and `tmp` is
-# taken above a checkpoint and released before returning, so only the chain
-# links stay live.
-#
-# `mul!` cannot write into a differently-partitioned destination, hence the
-# separate re-permute. Writing this as a single `tensorcontract!(result, link,
-# pid, false, mt, ((1,), (2,)), false, p, …)` does **not** fuse the two, and this
-# was measured rather than assumed. `p` exchanges a codomain axis with the lone
-# domain axis, so `TO.isblasdestination(result, p)` is `false`, `copyC` is taken,
-# and `blas_contract!` allocates the very same `dim(space(T))` intermediate and
-# pays the very same second pass. Interleaved A/B over
-# `{z2, fz2, fz2_u1, fz2_u1_flat} × χ ∈ {8, 32, 64}` on the honeycomb vertex: the
-# fused form is **0.3-9.8% slower** at every point, never faster, the cost being
-# `tensorcontract!`'s `_contract_candidates` / `_contract_memcost` dispatch.
-# (It can also be worse than that: when the contracted leg is dual on the message
-# side, `blas_contract!` twists — and therefore copies — `mt` itself, duplicating
-# the twist `_transposed_message` has already folded in.)
+# `mul!` cannot write into a differently-partitioned destination, hence the separate
+# re-permute. **Do not try to fuse them into one `tensorcontract!`** — measured 0.3-9.8%
+# slower at every point, for the reason given in `docs/src/design.md`, "Measured dead ends".
 function _blocked_step(link, mt, pid, p, backend, allocator)
     result = tensoralloc_add(scalartype(link), link, p, false, Val(true), allocator)
     cp = allocator_checkpoint!(allocator)
@@ -664,27 +544,15 @@ function _blocked_step(link, mt, pid, p, backend, allocator)
     return result
 end
 
-function compute_message!(
-        out, msgs::BPMessages, state::TensorNetworkState,
-        edges::AbstractVector{<:DirectedEdge}, backend::BlockedBackend,
-        allocator = default_allocator(state),
-    )
-    isempty(edges) && return out
-    inner = inner_backend(backend)
-    # Non-symmetric braiding / non-`Array` / `Trivial` / `numout > 1`: the pairwise
-    # kernel stays the oracle.
-    uses_blocked_kernel(state[first(first(edges))]) ||
-        return _pairwise_message!(out, msgs, state, edges, inner, allocator)
-    return _blocked_message!(out, msgs, state, edges, inner, allocator)
-end
-
 function _blocked_message!(
         out, msgs::BPMessages, state::TensorNetworkState,
         edges::AbstractVector{<:DirectedEdge}, backend, allocator,
     )
     v = first(first(edges))
     T = state[v]
+    _require_symmetric_braiding(T)
     M = numind(T)
+    np = numout(T)
     nbrs = neighbors(state, v)
     d = length(nbrs)
     target_legs = map(edges) do e
@@ -694,12 +562,28 @@ function _blocked_message!(
     legmin, legmax = extrema(target_legs)
 
     # Every space query is hoisted here: the loops below touch only tensors.
+    #
+    # Virtual leg `k` sits at tensor slot `np + k`, and a `Layout` has `M - 1` codomain
+    # axes and one domain axis whatever `np` is, so only the slot arithmetic depends on
+    # the physical arity. In `Layout(k)`'s own axis order the leg that a chain step moves
+    # into the domain is at position `np + k` for both chains: on the ket side the legs
+    # before `k + 1` skip `k`, and on the bra side (source `Layout(k+1)`) nothing before
+    # `k` is skipped.
+    #
+    # `np > 1` is **not exercised**: `StateTensor` is `TensorMap{T, S, 1, N, A}`, so a
+    # `TensorNetworkState` has exactly one physical leg, and a `TensorNetworkOperator`
+    # reaches BP through the fused view of `TensorNetworkState(op)`, which is also
+    # `numout == 1`. The arity is threaded through anyway so the kernel carries no
+    # single-physical-leg assumption; treat the `np > 1` path as unverified until
+    # something can supply such a tensor.
     allinds = ntuple(identity, M)
-    layout(k) = (TupleTools.deleteat(allinds, k + 1), (k + 1,))    # Layout(k)
+    layout(k) = (TupleTools.deleteat(allinds, np + k), (np + k,))   # Layout(k)
     pid = (ntuple(identity, M - 1), (M,))                          # a layout's own partition
     pswap(j) = (ntuple(i -> ifelse(i == j, M, i), M - 1), (j,))     # Layout(j-1) ↔ Layout(j)
     pmsg = ((2,), (1,))                                            # message → composable form
-    dual_phys = isdual(space(T, 1))
+    # `Z`'s physical factor: one `twist(σ_p)` per *dual* physical leg. `twist!` applies the
+    # product of the given legs in a single pass.
+    dual_phys = filter(p -> isdual(space(T, p)), ntuple(identity, np))
 
     incoming = map(n -> msgs[DirectedEdge(n, v)], nbrs)
 
@@ -713,11 +597,11 @@ function _blocked_message!(
     # concrete and GPU-portable.
     ket1 = tensoralloc_add(scalartype(T), T, layout(1), false, Val(true), allocator)
     tensoradd!(ket1, T, layout(1), false, One(), Zero(), backend, allocator)
-    dual_phys && twist!(ket1, (1,))            # the physical leg's `Z` factor
+    isempty(dual_phys) || twist!(ket1, dual_phys)   # the physical legs' `Z` factor
     ket = Vector{typeof(ket1)}(undef, d)
     ket[1] = ket1
     for k in 1:(legmax - 1)
-        ket[k + 1] = _blocked_step(ket[k], msgt[k], pid, pswap(k + 1), backend, allocator)
+        ket[k + 1] = _blocked_step(ket[k], msgt[k], pid, pswap(np + k), backend, allocator)
     end
 
     # bra chain, `Layout(d)` down to `Layout(legmin)`: `bra[k]` has messages
@@ -728,7 +612,7 @@ function _blocked_message!(
     bra[d] = brad
     for k in (d - 1):-1:legmin
         bra[k] = _blocked_step(
-            bra[k + 1], adjoint(msgt[k + 1]), pid, pswap(k + 1), backend, allocator
+            bra[k + 1], adjoint(msgt[k + 1]), pid, pswap(np + k), backend, allocator
         )
     end
 

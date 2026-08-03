@@ -145,8 +145,8 @@ const _P_FZ2U1 = _fz2u1_space((0, 1), (1, 1))
 
 # Non-abelian fixtures
 # --------------------
-# `uses_blocked_kernel` does not require abelian fusion (it never did need to —
-# see `src/backends.jl`), so the A/B has to cover `UniqueFusion() === false` too.
+# The blocked kernel never required abelian fusion (see `PairwiseBackend`), so the A/B
+# has to cover `UniqueFusion() === false` too.
 # These are the *only* fixtures where a relayout pays TensorKit's
 # `GenericTreeTransformer` instead of the cached `AbelianTreeTransformer`, which is
 # the one place the blocked kernel could plausibly lose ground it holds elsewhere —

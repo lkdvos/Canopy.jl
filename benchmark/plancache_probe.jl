@@ -41,6 +41,12 @@
 # one fixture, alternating within each repetition, min-of-inner then min-over-reps,
 # with a `control` arm that runs the cheat kernel against itself so its deviation
 # from 1.0 is the noise floor.
+#
+# DO NOT DELETE THIS FILE when pruning settled probes. Its verdict is settled ("do not
+# implement the plan cache", `reports/phase4a.md` Part B), but `benchmark/subblock_probe.jl`
+# **includes** it for the `CheatPlan` / `build_plan` / `transport!` / `absorb!` / `close!`
+# machinery, which is the reference implementation of the plan-based kernel the threading
+# follow-up ports. Removing this breaks that probe.
 
 using Canopy
 import AlgorithmsInterface as AI
@@ -105,10 +111,10 @@ _cachecounts() = Dict(
 function count_lookups(sym::Symbol, χ::Int; ncalls::Int = 20)
     state, msgs, edges, out = fixture(sym, χ)
     buf = Bumper.default_buffer(Bumper.ResizeBuffer)
-    compute_message!(out, msgs, state, edges, BlockedBackend(), buf)   # warm every cache
+    compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf)   # warm every cache
     before = _cachecounts()
     for _ in 1:ncalls
-        compute_message!(out, msgs, state, edges, BlockedBackend(), buf)
+        compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf)
     end
     after = _cachecounts()
     return Dict(k => (after[k] - before[k]) / ncalls for k in keys(before))
@@ -185,7 +191,7 @@ end
 function profile_one(sym::Symbol, χ::Int; seconds::Float64 = 3.0)
     state, msgs, edges, out = fixture(sym, χ)
     buf = Bumper.default_buffer(Bumper.ResizeBuffer)
-    call() = compute_message!(out, msgs, state, edges, BlockedBackend(), buf)
+    call() = compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf)
     call()
     t = @elapsed call()
     ncalls = max(10, ceil(Int, seconds / max(t, 1.0e-6)))
@@ -454,7 +460,7 @@ function cheat_row(sym::Symbol, χ::Int; reps = AB_REPS, inner = AB_INNER)
     b = CheatBuffers(scalartype(T), pl)
     msgdata = [msgs[DirectedEdge(n, v)].data for n in nbrs]
 
-    ref = compute_message(msgs, state, edges, BlockedBackend(), allocator)
+    ref = compute_message(msgs, state, edges, TO.DefaultBackend(), allocator)
     cheat_call!(pl, b, T.data, msgdata, backend, allocator)
     maxdiff = maximum(
         norm(b.out[i] - ref[i].data) / max(norm(ref[i].data), eps())
@@ -463,7 +469,7 @@ function cheat_row(sym::Symbol, χ::Int; reps = AB_REPS, inner = AB_INNER)
     maxdiff < 1.0e-12 || error("$sym χ=$χ: cheat kernel disagrees by $maxdiff")
 
     buf = Bumper.default_buffer(Bumper.ResizeBuffer)
-    real_call() = compute_message!(out, msgs, state, edges, BlockedBackend(), buf)
+    real_call() = compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf)
     cheat() = cheat_call!(pl, b, T.data, msgdata, backend, allocator)
     real_call(); cheat()
 

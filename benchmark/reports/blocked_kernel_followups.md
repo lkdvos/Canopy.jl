@@ -6,15 +6,17 @@ one particular threading decomposition. **`phase4a.md`'s "no" is narrower than i
 reads — see §2.**
 
 State at time of writing: `symmetry-kernel`, PR #27 (draft), rebased onto `#26`.
-`Pkg.test()` 9576/9576, `scripts/hubbard_quench` 249/249, all six examples rendered.
+`Pkg.test()` 11260/11260, `scripts/hubbard_quench` 249/249, all six examples rendered
+(unchanged — no example fixture is non-abelian).
 
 ---
 
 > **STATUS (updated after acting on §1 and §2).**
 > **§1 is DONE** — the gate is dropped, non-abelian is tested and passes. **§2 is
-> MEASURED and it is a GO above χ = 64**: 5.46× on the message kernel at the production
+> MEASURED and it is a GO above χ = 64**: 4.4-5.5× on the message kernel at the production
 > point, against §2's own predicted 2.3× cap, which this design beats because it threads
-> the copies as well as the gemms. See `subblock_probe.md` for the verdict and
+> the copies as well as the gemms (4.4-5.5× over two runs — quote the range). See
+> `subblock_probe.md` for the verdict and
 > `subblock_probe_t{1,8}.md` for raw tables. Three claims in §2 below are **wrong** and
 > are corrected inline: the 2.3× ceiling, the "dynamic scheduling" recommendation, and
 > the bitwise-reproducibility requirement. §2's implementation has **not** been written.
@@ -25,7 +27,7 @@ State at time of writing: `symmetry-kernel`, PR #27 (draft), rebased onto `#26`.
 > `SymmetricBraiding`, `A <: Array`, `I !== Trivial` and `numout(t) == 1` remain. The
 > analysis below was correct in every particular.
 >
-> `test_messages_blocked.jl` passes 7697/7697 with `Vect[SU2Irrep]` and
+> `test_messages_blocked.jl` passes 6857/6857 with `Vect[SU2Irrep]` and
 > `hubbard_space(Trivial, SU2Irrep)` added to `_MSG_SPACES`, including the decisive
 > non-Hermitian testset, the dual-physical-space and padded-leg testsets, and the
 > `tensoralloc` fingerprint test that proves the blocked path is the one that ran. The
@@ -75,6 +77,25 @@ State at time of writing: `symmetry-kernel`, PR #27 (draft), rebased onto `#26`.
 > Still **not** covered: `BraidingStyle` is the remaining gate and no anyonic fixture
 > tests that the fallback fires for it. And the §2 threading probe is abelian-only, so
 > no threading claim covers these new symmetries.
+>
+> **The `Trivial` exclusion went too, and it was the more surprising one.** §1 above
+> tells you to *keep* it ("that one is a *performance* choice — the pairwise path
+> short-circuits via `has_array_view` to plain arrays and one large BLAS call"). That
+> claim had never been measured, and `BlockedBackend` could not measure it — it consults
+> `uses_blocked_kernel`, so both arms fell back and the `:trivial` row of `backend_ab.md`
+> was a *control*, not a ratio. Calling `_blocked_message!` directly puts blocked
+> **1.10-1.17× ahead** over χ ∈ 32…128, agreeing to <1e-12. The short-circuit is real (10
+> `tensoralloc` calls against 17 on a graded fixture, blocked 13 either way) but it saves
+> only fusion-tree overhead, which a single-tree tensor barely has; it does not make the
+> index permutations free, so blocked's `2d` copy passes against pairwise's `≈4d - 2`
+> still decide it. Selection is now `SymmetricBraiding && A <: Array && numout == 1`, and
+> pairwise is reached only by two-physical-leg operators, GPU storage and anyonic braiding.
+>
+> Consequence worth knowing: `bench_backend_ab.jl`'s control arm *was* `:trivial`,
+> precisely because it fell back. Every row now carries its own control (a second blocked
+> arm), which is better anyway — a control that depends on the selection rule stops being
+> one the moment the rule changes, and one floor for a whole table is weaker than one per
+> fixture.
 
 ### Original analysis (retained — it was right)
 
@@ -215,7 +236,8 @@ Why this is a different proposition:
 
 1. **Achievable concurrency and per-unit work** at production `(symmetry, χ)`: number of
    independent units, and median work per unit against the measured `@spawn` round trip
-   (`benchmark/reports/blockloop_probe_t*.md` has the calibration).
+   (`phase4a.md` "Spawn round trip" has the calibration: 0.93-1.10 µs at
+   `nthreads = 1`, 1.1-9.4 µs above it).
 2. **Reduction cost** as a fraction of the whole — `nthreads × d × χ²` adds and the
    allocation of those buffers.
 3. **The serial `t_block_loop / t_kernel` ceiling still bounds you.** Measured 0.57-0.60

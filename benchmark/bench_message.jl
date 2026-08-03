@@ -78,12 +78,15 @@ end
 # shared boxes. `:pairwise` is the same code path as the default, made explicit,
 # so it is also the noise control for this group.
 #
-# `:trivial` must be *unaffected*: `uses_blocked_kernel` excludes `Trivial`, so
-# the `:blocked` key falls straight back to the pairwise kernel and the two keys
-# must agree to within noise.
+# `:trivial` used to be the exception here — the selection rule excluded `Trivial`, so
+# its `:blocked` key fell back and the two keys had to agree to within noise. That
+# exclusion was measured and removed (blocked is 1.10-1.17× ahead there), and in fact the
+# whole selection rule is gone, so `:trivial` is now an ordinary row and its two keys are
+# expected to *differ*. The `:blocked` key is `TO.DefaultBackend()` because that *is* the
+# blocked kernel now.
 const MSG_BACKENDS = (
     :pairwise => PairwiseBackend(),
-    :blocked => BlockedBackend(),
+    :blocked => TO.DefaultBackend(),
 )
 
 for (sym, P, V) in BENCH_SPACES, χ in MSG_CHIS, (bname, bk) in MSG_BACKENDS

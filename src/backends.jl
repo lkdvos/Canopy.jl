@@ -1,59 +1,81 @@
-# --- kernel-selection backends ------------------------------------------------
+# --- kernel selection ---------------------------------------------------------
 #
-# Canopy's contraction kernels take a `backend` argument that is threaded through
-# to TensorOperations. The two wrappers below ride on that argument to select
-# *which Canopy kernel* runs, and carry the real TO backend as `inner`.
+# The vertex-batched BP message kernel has two formulations (see `docs/src/design.md`):
+# the `Layout(k)` *blocked* one, which is what runs, and a *pairwise* one kept as the
+# differential-test oracle. There is no longer a selection **rule** — blocked runs
+# unconditionally — so the only selector left is the one that forces the oracle.
 #
-# They are **selectors, not backends**: no `TO.tensoradd!` / `TO.tensorcontract!`
-# method accepts them, deliberately. Adding forwarding methods would risk
-# ambiguity with TensorOperations' own `(::AbstractArray, …, ::StridedBackend, …)`
-# methods, and would make a kernel that forgot to unwrap silently take the wrong
-# path. Instead every kernel entry point unwraps with [`inner_backend`](@ref) on
-# its first line, so a missed site fails loudly with a `MethodError`.
-
-"""
-    BlockedBackend(inner = DefaultBackend())
-
-Force the `Layout(k)` formulation of the vertex-batched BP message kernel
-([`compute_message!`](@ref)), with `inner` as the underlying TensorOperations
-backend.
-
-**This is not normally needed.** An ordinary backend already selects the blocked
-kernel wherever [`uses_blocked_kernel`](@ref) holds; the wrapper exists so tests
-and benchmarks can pin one kernel against the other on identical inputs.
-
-The blocked kernel keeps the open (target) leg alone in the **domain** at every
-step of both chains, so each chain step is a single transposition plus one `gemm`
-per coupled sector, and the closing writes the output message in its natural
-partition. Fermionic signs are folded into the (tiny) transposed messages and
-the ket entry copy rather than paid as `twist!` passes over the chain links.
-
-Falls back to the pairwise kernel whenever
-`Canopy.uses_blocked_kernel(state[v])` is `false` — non-symmetric braiding,
-non-`Array` storage, more than one physical leg, and `Trivial` sectors (for which
-the pairwise path short-circuits to plain-array TensorOperations and one large
-BLAS call, which this cannot beat). Non-abelian fusion is *not* excluded.
-
-Only the vertex-batched message kernel is specialized; every other kernel simply
-uses `inner`. The single-edge `compute_message!` and the residual-driven
-schedules that use it are unaffected by either wrapper. See also
-[`PairwiseBackend`](@ref).
-"""
-struct BlockedBackend{B <: TensorKit.TO.AbstractBackend} <: TensorKit.TO.AbstractBackend
-    inner::B
-end
-BlockedBackend() = BlockedBackend(DefaultBackend())
+# `PairwiseBackend` is a **selector, not a backend**: no `TO.tensoradd!` /
+# `TO.tensorcontract!` method accepts it, deliberately. Adding forwarding methods would
+# risk ambiguity with TensorOperations' own `(::AbstractArray, …, ::StridedBackend, …)`
+# methods, and would make a kernel that forgot to unwrap silently take the wrong path.
+# Instead every kernel entry point unwraps with [`inner_backend`](@ref) on its first
+# line, so a missed site fails loudly with a `MethodError`.
 
 """
     PairwiseBackend(inner = DefaultBackend())
 
-Force the pairwise BP message kernel, with `inner` as the underlying
-TensorOperations backend.
+Force the **pairwise** formulation of the vertex-batched BP message kernel
+([`compute_message!`](@ref)), with `inner` as the underlying TensorOperations backend.
 
-The pairwise kernel is no longer what an ordinary backend runs on symmetric
-states — see [`uses_blocked_kernel`](@ref) — so this is the handle for pinning it
-anyway: it is the oracle [`BlockedBackend`](@ref) is differentially tested
-against, and the two can be run on identical inputs in one process.
+**A testing and benchmarking handle, not a production one.** An ordinary backend runs the
+`Layout(k)` blocked formulation unconditionally. The pairwise formulation is retained
+because it is the oracle the blocked kernel is differentially tested against, and the arm
+the A/B in `benchmark/reports/backend_ab.md` measures.
+
+Only the vertex-batched message kernel is specialized; every other kernel simply uses
+`inner`. The single-edge [`compute_message!`](@ref) and the residual-driven schedules that
+use it are unaffected.
+
+## There used to be a selection rule, and every condition in it was wrong
+
+`uses_blocked_kernel(spacetype, storagetype)` gated the blocked kernel on four conditions.
+All four are gone, and the history is recorded because three were removed by *measuring* an
+argument that had only been asserted:
+
+- **abelian fusion** (`UniqueFusion`) — never needed. Every step of the blocked chain is a
+  `TensorMap`-level operation that handles a general fusion style itself, and no step has
+  to recover all uncoupled sectors from one coupled label. Non-abelian is in fact where the
+  blocked kernel wins *most* (`fz2_su2` 2.30×, `su2` 1.58× at χ = 64).
+- **`I !== Trivial`** — justified by the claim that the pairwise path short-circuits via
+  `has_array_view` to plain-array TensorOperations and could not be beaten. Never measured,
+  and false: blocked is 1.10-1.17× faster there over χ ∈ 32…128. The short-circuit does
+  save pairwise the fusion-tree overhead, but it does not make index permutations free, so
+  blocked's `2d` copy passes against pairwise's `≈4d - 2` still decide it.
+- **`numout(t) == 1`** — the chain now threads `numout(T)` through its slot arithmetic.
+  That removed an assumption rather than enabling a feature: nothing can currently supply a
+  two-physical-leg tensor (`docs/src/design.md`, "Physical arity").
+- **`A <: Array`** — removed deliberately, and this is the one to know about:
+  **GPU storage now takes the blocked kernel and there is no GPU test anywhere.** The
+  kernel is written to be storage-generic and `default_allocator` already routes
+  non-`Array` storage away from the CPU Bumper buffer, so there is no *known* defect — but
+  neither formulation has ever been run on a GPU. If GPU BP matters, the first thing to add
+  is a differential test, not a predicate. And the CPU A/B does not transfer automatically:
+  blocked issues two operations per chain step where pairwise issues one fused contraction,
+  and each `mul!` is one gemm *per coupled sector*, so on a device where launch overhead
+  dominates, the graded fixtures could invert.
+
+## What the A/B actually says, now that nothing is gated on it
+
+`benchmark/reports/backend_ab.md`, seven symmetries × χ ∈ {64, 128}, each row carrying its
+own control arm (a second blocked arm, so `control` is byte-identical code against itself;
+they land at 0.962-1.014, i.e. a ±4 % floor):
+
+- ratios run **1.04 to 2.48**, and the wins concentrate exactly where the formulation was
+  designed to win — smallest mean subblock first: `fz2_su2` 2.48/1.89, `su2` 1.68/1.50,
+  `fz2_u1` 1.74/1.23;
+- `:trivial` is 1.17/1.12 with `maxdiff = 0`, i.e. the two formulations agree *bitwise*
+  there;
+- `:z2` at χ = 64 is the weakest row and the only one that has not cleanly cleared its
+  control: 1.036 here against 0.987 in an immediately preceding run, i.e. somewhere around
+  parity-to-slightly-ahead with a per-arm spread near 10 %. **Quote the supportable claim,
+  "never meaningfully slower", rather than "always faster"** — and note that with the
+  selection rule gone there is no longer anything a threshold could have protected there.
+
+Non-symmetric braiding is *not* part of the removed list: it is rejected outright by
+`Canopy._require_symmetric_braiding`, because belief propagation cannot support it in either
+formulation — every blocked primitive succeeds under anyonic braiding, but the sign
+derivation needs `twist(σ)² = 1`, so a silent fallback would have been the wrong shape.
 """
 struct PairwiseBackend{B <: TensorKit.TO.AbstractBackend} <: TensorKit.TO.AbstractBackend
     inner::B
@@ -63,68 +85,9 @@ PairwiseBackend() = PairwiseBackend(DefaultBackend())
 """
     inner_backend(backend) -> TO.AbstractBackend
 
-The real TensorOperations backend behind a Canopy kernel selector; the identity
-on anything else. Called on the first line of every Canopy kernel that forwards
-its `backend` to TensorOperations.
+The real TensorOperations backend behind a Canopy kernel selector; the identity on anything
+else. Called on the first line of every Canopy kernel that forwards its `backend` to
+TensorOperations.
 """
 inner_backend(backend) = backend
-inner_backend(backend::Union{BlockedBackend, PairwiseBackend}) = backend.inner
-
-"""
-    uses_blocked_kernel(t) -> Bool
-    uses_blocked_kernel(::Type{S}, ::Type{A}) -> Bool
-
-Whether the blocked message kernel applies to a tensor with space type `S` and
-storage type `A`. **This is the selection rule**: the vertex-batched
-[`compute_message!`](@ref) runs the blocked kernel exactly when this holds and
-the caller has not forced a kernel with [`BlockedBackend`](@ref) /
-[`PairwiseBackend`](@ref).
-
-Requires symmetric braiding (the fermionic-sign derivation in `src/messages.jl`
-uses `twist(σ)² = 1`, which is what `SymmetricBraiding` gives — see the note below
-on why abelian fusion is *not* required) and plain CPU `Array` storage. `Trivial`
-is excluded on purpose — see [`BlockedBackend`](@ref).
-
-**Non-abelian fusion is supported.** The gate used to require `UniqueFusion` as
-well; that was unnecessary. Every step of the blocked chain is a `TensorMap`-level
-operation that handles a general fusion style on its own — the braids and
-relayouts are `tensoradd!` with a permutation (TensorKit routes those through
-`GenericTreeTransformer`, which is the correct basis change), the absorptions and
-the closing are `mul!` / `adjoint` (composition is block-wise in the *coupled*
-sector and never mixes fusion trees), and both twists are TensorKit's own or
-provably equal to it (`_twist_message!`). No step ever has to recover all
-uncoupled sectors from one coupled label: `twist(σⱼ)` is folded onto message `j`,
-where leg `j`'s sector is manifest, and the physical factor onto the ket entry.
-
-There is deliberately **no size threshold**. Interleaved same-fixture A/B on the
-degree-3 honeycomb vertex (`benchmark/reports/backend_ab.md`) puts the blocked
-kernel ahead at every measured `(symmetry, χ)`, and it never loses, so there is
-nothing for a threshold to protect. The current report covers seven symmetries at
-χ ∈ {64, 128}: ratios 1.04-2.42 excluding the `Trivial` control, which itself
-lands at 0.985-1.024 and is this harness's measurement floor. Earlier runs
-extended down to χ = 8 with the same verdict.
-
-The two **non-abelian** rows are the largest ratios in the table — `fz2_su2`
-2.42× / 1.90× and `su2` 1.54× / 1.41× at χ = 64 / 128, against `fz2_u1`'s 1.23× at
-χ = 128 — because they have the smallest mean subblocks (91-122 entries against
-1365), which is the regime this formulation targets, and because the *pairwise*
-arm pays the same `GenericTreeTransformer` tax so non-abelian hands nothing back.
-
-Both arguments are types, so this constant-folds at any call site with a concrete
-state type.
-
-The tensor method additionally requires **exactly one physical leg**
-(`numout(t) == 1`). The `Layout(k)` chain addresses virtual leg `k` at tensor
-slot `k + 1` and folds a single physical leg's twist into the ket entry, so a
-[`TensorNetworkOperator`](@ref) site tensor (`numout == 2`) would silently be
-contracted on the wrong slots. Those fall back to the pairwise kernel, which is
-generic in the codomain arity. Generalizing the blocked chain to `numout > 1` is
-follow-up work: `layout`, `dual_phys` and the entry braids all need the physical
-block treated as a group rather than as slot 1.
-"""
-uses_blocked_kernel(t::AbstractTensorMap) =
-    numout(t) == 1 && uses_blocked_kernel(spacetype(t), TensorKit.storagetype(t))
-function uses_blocked_kernel(::Type{S}, ::Type{A}) where {S, A}
-    I = sectortype(S)
-    return I !== Trivial && BraidingStyle(I) isa SymmetricBraiding && A <: Array
-end
+inner_backend(backend::PairwiseBackend) = backend.inner

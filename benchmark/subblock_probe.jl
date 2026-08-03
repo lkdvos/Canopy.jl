@@ -77,8 +77,9 @@
 # -----------------------------------------------------
 # **Abelian fixtures only.** The per-sector cheat kernel this probe extends assumes
 # one destination subblock per source subblock (`transport!` writes with `β = 0`),
-# which holds for `UniqueFusion` and not otherwise. `uses_blocked_kernel` *does*
-# accept non-abelian fusion (see `src/backends.jl`), so the non-abelian path is
+# which holds for `UniqueFusion` and not otherwise. The blocked kernel itself *does*
+# handle non-abelian fusion (there is no selection rule left at all — see
+# `PairwiseBackend`), so the non-abelian path is
 # genuinely uncovered here; it is measured against the pairwise kernel in
 # `benchmark/reports/backend_ab.md` instead. A non-abelian unit is well defined (see
 # above) but its relayout mixes trees inside the unit, which this plan cannot
@@ -767,7 +768,7 @@ function _arms(sym::Symbol, χ::Int)
     plU = build_unit_plan(state, msgs, edges)
     msgdata = [msgs[DirectedEdge(n, v)].data for n in nbrs]
 
-    ref = compute_message(msgs, state, edges, BlockedBackend(), allocator)
+    ref = compute_message(msgs, state, edges, TO.DefaultBackend(), allocator)
     cheat_call!(plS, bS, T.data, msgdata, backend, allocator)
     md_s = maximum(
         norm(bS.out[i] - ref[i].data) / max(norm(ref[i].data), eps()) for i in eachindex(ref)
@@ -787,7 +788,7 @@ function serial_row(sym::Symbol, χ::Int; reps = SUB_REPS, inner = SUB_INNER)
     md_u < 1.0e-12 || error("$sym χ=$χ: per-unit kernel disagrees by $md_u")
 
     buf = Bumper.default_buffer(Bumper.ResizeBuffer)
-    real_call() = compute_message!(a.out, a.msgs, a.state, a.edges, BlockedBackend(), buf)
+    real_call() = compute_message!(a.out, a.msgs, a.state, a.edges, TO.DefaultBackend(), buf)
     sector() = cheat_call!(a.plS, a.bS, a.T.data, a.msgdata, a.backend, a.allocator)
     unit() = unit_call_serial!(a.plU, bU, a.T.data, a.msgdata, a.backend, a.allocator)
     real_call(); sector(); unit()
@@ -919,7 +920,7 @@ end
 function blas_row(sym::Symbol, χ::Int, counts; reps = SUB_REPS, inner = SUB_INNER)
     state, msgs, edges, out = fixture(sym, χ)
     buf = Bumper.default_buffer(Bumper.ResizeBuffer)
-    call() = compute_message!(out, msgs, state, edges, BlockedBackend(), buf)
+    call() = compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf)
     n0 = BLAS.get_num_threads()
     ts = [Float64[] for _ in counts]
     tc = Float64[]

@@ -15,18 +15,21 @@ using MatrixAlgebraKit: notrunc
 using Random
 using Test
 
-# `BlockedBackend` re-runs the vertex-batched message kernel in the `Layout(k)`
-# formulation: one layout family, the target leg alone in the domain, fermionic
-# signs folded into the (χ²) transposed messages instead of paid as `twist!`
-# passes over the chain links. It must be *numerically identical* to the pairwise
-# kernel, which stays the oracle — hence this file is one long differential test.
+# The vertex-batched message kernel runs the `Layout(k)` formulation **unconditionally**:
+# one layout family, the target leg alone in the domain, fermionic signs folded into the
+# (χ²) transposed messages instead of paid as `twist!` passes over the chain links. It must
+# be *numerically identical* to the pairwise formulation, which is retained only as the
+# oracle and is reached only through `PairwiseBackend` — hence this file is one long
+# differential test.
 #
-# Two things are deliberately asserted alongside every comparison:
+# `space(blocked[i]) == space(pairwise[i])` is asserted alongside every comparison: a
+# kernel that silently drops a zero-dimensional sector still compares `≈` but breaks
+# `check_consistency`.
 #
-#   * `space(blocked[i]) == space(pairwise[i])`. A kernel that silently drops a
-#     zero-dimensional sector still compares `≈` but breaks `check_consistency`.
-#   * `Canopy.uses_blocked_kernel(state[v])`, i.e. *which path actually ran*.
-#     Without it a blocked kernel that always fell back would pass everything.
+# There is no longer a selection *predicate* to assert against. What used to be checked as
+# the selection predicate is now checked structurally, by the `tensoralloc`
+# fingerprint near the end of this file: the default path must not look like the pairwise
+# one. That is the guard against a fallback being reintroduced by accident.
 
 _state_on(g, P, V; seed) = (Random.seed!(seed); randn_state(ComplexF64, g, P, V))
 
@@ -37,7 +40,7 @@ _state_on(g, P, V; seed) = (Random.seed!(seed); randn_state(ComplexF64, g, P, V)
 # abelian fusion: every step of the chain is a `TensorMap`-level operation
 # (`tensoradd!` permutes, `mul!`, `adjoint`, `twist!`) that handles a general
 # fusion style on its own, and the sign derivation needs `twist(σ)² = 1` — i.e.
-# `SymmetricBraiding` — not `UniqueFusion`. See [`uses_blocked_kernel`](@ref).
+# `SymmetricBraiding` — not `UniqueFusion`. See [`PairwiseBackend`](@ref).
 # `hubbard_space(Trivial, SU2Irrep)` is the spin-SU(2) Hubbard physical space, so the
 # row covers a physically meaningful space and not only the fusion style. Note it is
 # *not* currently reachable from `scripts/hubbard_quench`, which rejects SU(2) in
@@ -91,15 +94,10 @@ _msg_geometries(sname) =
     sname in ("SU(2)", "fZ2xSU2") ?
     filter(g -> first(g) != "K6", collect(_MSG_GEOMETRIES)) : collect(_MSG_GEOMETRIES)
 
-# `Trivial` is excluded from the blocked path on purpose: the pairwise kernel
-# short-circuits via `has_array_view` to plain-array TensorOperations and one
-# large BLAS call, which the blocked formulation cannot beat.
-_expect_blocked(P) = sectortype(P) !== Trivial
-
 # Blocked vs pairwise on one vertex batch, returning both so the caller can chain
 # further comparisons without recomputing.
 function _cmp_batch(msgs, state, edges)
-    out_b = compute_message(msgs, state, edges, BlockedBackend(), DefaultAllocator())
+    out_b = compute_message(msgs, state, edges, DefaultBackend(), DefaultAllocator())
     out_p = compute_message(msgs, state, edges, PairwiseBackend(), DefaultAllocator())
     @test length(out_b) == length(edges)
     for i in eachindex(edges)
@@ -117,7 +115,6 @@ end
                 BPMessages(state), state; maxiter = 5, tol = 0, schedule = SynchronousSchedule()
             )
             for v in vertices(state)
-                @test Canopy.uses_blocked_kernel(state[v]) == _expect_blocked(P)
                 edges = collect(outgoing_edges(state, v))
                 out_b, out_p = _cmp_batch(msgs, state, edges)
                 for (i, e) in enumerate(edges)
@@ -195,8 +192,7 @@ end
 # the `Z` factor, so it is the one sign term the geometry sweep cannot reach.
 @testset "blocked ≡ pairwise (dual physical space)" begin
     for (sname, P, V) in _MSG_SPACES
-        _expect_blocked(P) || continue
-        @testset "$sname" begin
+                @testset "$sname" begin
             g = star_graph(5)
             state = _state_on(g, dual(P), V; seed = hash((sname, "dualP")))
             @test isdual(physicalspace(state, 1))
@@ -206,7 +202,6 @@ end
                 Random.randn!(msgs.messages[e])
             end
             for v in vertices(state)
-                @test Canopy.uses_blocked_kernel(state[v])
                 edges = collect(outgoing_edges(state, v))
                 _, out_p = _cmp_batch(msgs, state, edges)
                 for (i, e) in enumerate(edges)
@@ -225,8 +220,7 @@ end
 # builds it on purpose, with two padded legs at every vertex.
 @testset "blocked ≡ pairwise (oneunit-padded legs, d < N)" begin
     for (sname, P, V) in _MSG_SPACES
-        _expect_blocked(P) || continue
-        @testset "$sname" begin
+                @testset "$sname" begin
             g = path_graph(4)
             pspaces, vspaces = _spaces(g, P, V)
             state = TensorNetworkState{ComplexF64, typeof(P), 4}(undef, pspaces, vspaces)
@@ -252,49 +246,41 @@ end
     end
 end
 
-# The fallback must *fire* — asserting the predicate matters, because a silently
-# taken blocked path would otherwise pass by accident.
+# What the selection rule still rejects, and how.
 #
-# `SU(2)` used to be a row here, as the *non-abelian* exclusion. It has moved to
-# `_MSG_SPACES` (i.e. to the asserted-blocked sweep) because that exclusion was
-# unnecessary; the assertion was inverted rather than dropped, so a wrong
-# selection still cannot pass silently. `Trivial` remains — that one is a
-# deliberate *performance* exclusion, not a correctness one.
-@testset "fallback for unsupported sectors" begin
-    fixtures = (
-        ("trivial", ComplexSpace(2), ComplexSpace(3)),
+# There is nothing left of it: the abelian, `Trivial`, single-physical-leg and
+# `Array`-storage conditions were all removed, and the predicate with them, so the
+# blocked formulation now runs for every input. Three of the four were retired by
+# *measuring* an argument that had only been asserted (`benchmark/reports/backend_ab.md`),
+# and in each case the assertion here was **inverted rather than deleted**.
+#
+# What replaces the predicate is the requirement below, which is a different kind of thing:
+# a correctness precondition of belief propagation rather than a choice between kernels.
+@testset "belief propagation requires symmetric braiding" begin
+    # This is the testset that matters most in this file after the non-Hermitian one,
+    # because it is the only place where removing a restriction would have produced
+    # *silently wrong numbers* rather than an error. Every primitive the blocked chain
+    # uses succeeds under anyonic braiding — `permute`/`tensoradd!` and `mul!` both work
+    # on `Vect[FibonacciAnyon]` — but the fermionic-sign derivation folds twists using
+    # `twist(σ)² = 1`, which is false there. So the kernel would run to completion.
+    #
+    # The three assertions before the `@test_throws` are what make this non-vacuous: they
+    # pin down that nothing *else* rejects this input, so `_require_symmetric_braiding` is
+    # load-bearing. If a future change makes any of them false, this testset explains why
+    # the guard exists instead of just failing.
+    P = Vect[FibonacciAnyon](:I => 1, :τ => 1)
+    V = Vect[FibonacciAnyon](:I => 2, :τ => 1)
+    @test !(BraidingStyle(sectortype(P)) isa SymmetricBraiding)
+    @test any(c -> !isone(twist(c)^2), sectors(V))
+    state = _state_on(star_graph(4), P, V; seed = hash("fib"))   # constructs fine
+    msgs = BPMessages(state)
+    edges = collect(outgoing_edges(state, 1))
+    @test_throws SectorMismatch compute_message(msgs, state, edges)
+    @test_throws SectorMismatch compute_message(
+        msgs, state, edges, DefaultBackend(), DefaultAllocator()
     )
-    for (sname, P, V) in fixtures
-        @testset "$sname" begin
-            state = _state_on(star_graph(5), P, V; seed = hash((sname, "fb")))
-            msgs = BPMessages(state)
-            Random.seed!(hash((sname, "fbmsg")))
-            for e in keys(msgs.messages)
-                Random.randn!(msgs.messages[e])
-            end
-            for v in vertices(state)
-                @test !Canopy.uses_blocked_kernel(state[v])
-                edges = collect(outgoing_edges(state, v))
-                _, out_p = _cmp_batch(msgs, state, edges)
-                for (i, e) in enumerate(edges)
-                    @test out_p[i] ≈ compute_message(msgs, state, e)
-                end
-            end
-        end
-    end
-
-    # `numout == 1` is the one restriction that is *real*: `layout(k)` addresses
-    # virtual leg `k` at tensor slot `k + 1` and `dual_phys` reads slot 1, so a
-    # two-physical-leg (`TensorNetworkOperator`) site tensor would be contracted on
-    # the wrong slots and return wrong numbers silently. Asserted on the predicate
-    # directly — the sector type here is otherwise fully supported, so the arity is
-    # the only thing that can be rejecting it.
-    @testset "two physical legs" begin
-        P = fermion_space(U1Irrep)
-        V = Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => 2, (1, 1) => 1, (1, -1) => 1)
-        @test Canopy.uses_blocked_kernel(randn(ComplexF64, P ← V ⊗ V))
-        @test !Canopy.uses_blocked_kernel(randn(ComplexF64, P ⊗ P' ← V ⊗ V))
-    end
+    # the single-edge kernel reaches it through TensorKit's own refusal
+    @test_throws Exception compute_message(msgs, state, first(edges))
 end
 
 @testset "blocked: Bumper ≡ default allocator + hygiene" begin
@@ -307,12 +293,12 @@ end
             buf = Bumper.default_buffer(Bumper.ResizeBuffer)
             for v in vertices(state)
                 edges = collect(outgoing_edges(state, v))
-                o_def = compute_message(msgs, state, edges, BlockedBackend(), DefaultAllocator())
+                o_def = compute_message(msgs, state, edges, DefaultBackend(), DefaultAllocator())
 
                 # `buffer_stats(...).peak` is a *process-lifetime* high-water mark:
                 # reset first, or a previous fixture's peak gets reported here.
                 Bumper.reset_buffer!(buf)
-                o_bmp = compute_message(msgs, state, edges, BlockedBackend(), buf)
+                o_bmp = compute_message(msgs, state, edges, DefaultBackend(), buf)
                 st_blocked = buffer_stats(buf)
                 @test buffer_isempty(buf)
                 @test st_blocked.noverflow == 0
@@ -332,9 +318,9 @@ end
     end
 end
 
-# `BeliefPropagation` stores *one* backend that every kernel sees, so a selector
-# must be transparent to the kernels that have no blocked variant.
-@testset "BlockedBackend is transparent to other kernels" begin
+# `BeliefPropagation` stores *one* backend that every kernel sees, so the remaining
+# selector must be transparent to every kernel that has no pairwise variant.
+@testset "PairwiseBackend is transparent to other kernels" begin
     P = fermion_space(U1Irrep)
     V = Vect[fℤ₂ ⊠ U1Irrep]((0, 0) => 2, (1, 1) => 1, (1, -1) => 1)
     g = path_graph(4)
@@ -346,10 +332,10 @@ end
 
     for v in vertices(state)
         ρ_d = reduced_density_matrix((v,), state, msgs; backend = DefaultBackend())
-        ρ_b = reduced_density_matrix((v,), state, msgs; backend = BlockedBackend())
+        ρ_b = reduced_density_matrix((v,), state, msgs; backend = DefaultBackend())
         @test space(ρ_b) == space(ρ_d)
         @test ρ_b ≈ ρ_d
-        @test expect(state, msgs, n, v; backend = BlockedBackend()) ≈
+        @test expect(state, msgs, n, v; backend = DefaultBackend()) ≈
             expect(state, msgs, n, v; backend = DefaultBackend())
     end
     for e in edges(state)
@@ -357,7 +343,7 @@ end
             (first(e), last(e)), state, msgs; backend = DefaultBackend()
         )
         ρ_b = reduced_density_matrix(
-            (first(e), last(e)), state, msgs; backend = BlockedBackend()
+            (first(e), last(e)), state, msgs; backend = DefaultBackend()
         )
         @test ρ_b ≈ ρ_d
     end
@@ -373,7 +359,7 @@ end
         BPMessages(st_b), st_b; maxiter = 8, tol = 0, schedule = SynchronousSchedule()
     )
     apply!(st_d, ms_d, gate; trunc = notrunc(), backend = DefaultBackend())
-    apply!(st_b, ms_b, gate; trunc = notrunc(), backend = BlockedBackend())
+    apply!(st_b, ms_b, gate; trunc = notrunc(), backend = DefaultBackend())
     for v in vertices(st_d)
         @test space(st_b[v]) == space(st_d[v])
         @test st_b[v] ≈ st_d[v]
@@ -383,27 +369,20 @@ end
     end
 end
 
-# --- automatic selection -------------------------------------------------------
+# --- which formulation actually runs -------------------------------------------
 #
-# The vertex-batched kernel picks its own formulation when the backend is an
-# ordinary one (`DefaultBackend()`, and whatever else reaches it): blocked when
-# `uses_blocked_kernel` holds, pairwise otherwise. The two selector backends
-# override it.
+# An ordinary backend (`DefaultBackend()`, and whatever else reaches the kernel) runs the
+# blocked formulation unconditionally; `PairwiseBackend` forces the oracle.
 #
-# Testing this by comparing *results* would be worthless twice over. The two
-# kernels are supposed to agree, so agreement proves nothing about which ran; and
-# on these fixtures they frequently agree **bitwise**, so not even `===` on the
-# output data discriminates. What does discriminate is the sequence of
-# temporaries: the pairwise chain repartitions the on-site tensor and closes with
-# a `tensorcontract!` that needs a `copyC` buffer for the `((2,),(1,))`
-# repartition of `out`, while the blocked chain transposes the (χ²) message and
-# closes straight into `out` with `mul!`. Logging every `TO.tensoralloc` through a
-# custom allocator therefore fingerprints the path — measured: 20 vs 24
-# allocations at a degree-4 `fℤ₂ ⊠ U1Irrep` vertex, 2 vs 3 at a leaf.
-#
-# `fp_blocked != fp_pairwise` is asserted alongside, so the fingerprint is proved
-# to discriminate at each fixture rather than assumed to; without it a degenerate
-# fingerprint would make the selection assertion vacuously true.
+# Testing that by comparing *results* would be worthless twice over. The two formulations
+# are supposed to agree, so agreement proves nothing about which ran; and on these fixtures
+# they frequently agree **bitwise**, so not even `===` on the output data discriminates.
+# What does discriminate is the sequence of temporaries: the pairwise chain repartitions the
+# on-site tensor and closes with a `tensorcontract!` that needs a `copyC` buffer for the
+# `((2,),(1,))` repartition of `out`, while the blocked chain transposes the (χ²) message
+# and closes straight into `out` with `mul!`. Logging every `TO.tensoralloc` through a
+# custom allocator therefore fingerprints the path — measured: 20 vs 24 allocations at a
+# degree-4 `fℤ₂ ⊠ U1Irrep` vertex, 2 vs 3 at a leaf.
 mutable struct LoggingAllocator
     log::Vector{Any}
 end
@@ -423,27 +402,27 @@ function _path_fingerprint(msgs, state, edges, backend)
     return a.log
 end
 
-@testset "DefaultBackend selects the blocked kernel" begin
-    # The expected verdict is spelled out per fixture rather than derived from
-    # `_expect_blocked` (which only excludes `Trivial`), because hard-coding it is
-    # the point: the `SU(2)` rows of `_MSG_SPACES` used to be the *non-abelian
-    # exclusion* and carried a hard-coded `false` here. They now carry a hard-coded
-    # `true`, and the fingerprint below proves the blocked path is the one that ran
-    # — an inverted assertion, not a deleted one. The `bosonic` row is the `false`
-    # one, so both verdicts are exercised here.
+@testset "the default path is the blocked kernel, not the pairwise one" begin
+    # With the selection rule gone this is structural rather than conditional: there is
+    # one production path and it must not look like the pairwise formulation. The test is
+    # kept — rather than deleted as tautological — because it is the guard against a
+    # fallback being reintroduced by accident, which a result comparison could never catch
+    # (the two kernels agree, and on these fixtures often agree bitwise).
     #
-    # The table is keyed by name and the key is asserted to match, so reordering or
-    # renaming a `_MSG_SPACES` row cannot silently realign the expectations.
-    expected_blocked = (
-        "bosonic" => false, "U(1)" => true, "fermionic" => true, "fZ2xU1" => true,
-        "SU(2)" => true, "fZ2xSU2" => true,
-    )
-    @test map(first, expected_blocked) == map(first, _MSG_SPACES)
-    fixtures = map(
-        ((r, ex),) -> (r[1], r[2], r[3], last(ex)), zip(_MSG_SPACES, expected_blocked)
-    )
+    # WHERE THE FINGERPRINT IS BLIND, AND WHY THAT IS ASSERTED RATHER THAN SKIPPED.
+    # It discriminates only when the two formulations issue different allocations, and at a
+    # **degree-1** vertex with a **`Trivial`** sector type they do not: neither chain takes
+    # a step, so both reduce to two entry copies plus a closing, and `has_array_view` means
+    # the pairwise closing does not need the `copyC` buffer that separates them for a graded
+    # sector. Both then allocate exactly two `Vector{ComplexF64}` of length 6.
+    #
+    # `discriminates` is therefore compared against an expectation, keeping this two-sided:
+    # if the fingerprint goes blind anywhere else — or stops being blind here — the testset
+    # fails and says so. Skipping the check for `Trivial` instead would let a future change
+    # that made it degenerate everywhere pass silently, which is the failure mode this
+    # assertion exists to prevent.
     g = star_graph(5)     # degree 4 at the centre, degree 1 at the leaves
-    for (sname, P, V, expected) in fixtures
+    for (sname, P, V) in _MSG_SPACES
         @testset "$sname" begin
             state = _state_on(g, P, V; seed = hash((sname, "sel")))
             msgs = BPMessages(state)
@@ -452,20 +431,12 @@ end
                 Random.randn!(msgs.messages[e])
             end
             for v in vertices(state)
-                blocked = Canopy.uses_blocked_kernel(state[v])
-                @test blocked == expected
                 edges = collect(outgoing_edges(state, v))
                 fp_default = _path_fingerprint(msgs, state, edges, DefaultBackend())
-                fp_blocked = _path_fingerprint(msgs, state, edges, BlockedBackend())
                 fp_pairwise = _path_fingerprint(msgs, state, edges, PairwiseBackend())
-                if blocked
-                    @test fp_blocked != fp_pairwise      # the fingerprint discriminates
-                    @test fp_default == fp_blocked       # …and the default took the blocked path
-                    @test fp_default != fp_pairwise
-                else
-                    @test fp_blocked == fp_pairwise      # the fallback fires
-                    @test fp_default == fp_pairwise      # …and so does the default
-                end
+                expect_discriminates =
+                    !(sectortype(P) === Trivial && length(neighbors(state, v)) == 1)
+                @test (fp_default != fp_pairwise) == expect_discriminates
             end
         end
     end
@@ -483,20 +454,20 @@ end
             )
             m_b = belief_propagation(
                 BPMessages(state), state; maxiter = 6, tol = 0,
-                schedule = SpanningTreeSchedule(), backend = BlockedBackend(),
+                schedule = SpanningTreeSchedule(), backend = DefaultBackend(),
             )
             # No `backend` at all: the whole default route, selection included.
             m_d = belief_propagation(
                 BPMessages(state), state; maxiter = 6, tol = 0,
                 schedule = SpanningTreeSchedule(),
             )
-            forced = _expect_blocked(P) ? m_b : m_p
             for e in keys(m_p.messages)
                 @test space(m_b[e]) == space(m_p[e])
                 @test m_b[e] ≈ m_p[e]
-                # bitwise, not `≈`: the default must be the *same* kernel, not
-                # merely a numerically equivalent one.
-                @test m_d[e].data == forced[e].data
+                # bitwise, not `≈`: the default must be the blocked kernel, not merely a
+                # numerically equivalent one. `m_b` is itself `DefaultBackend`, so this is
+                # a reproducibility check on top of the differential one against `m_p`.
+                @test m_d[e].data == m_b[e].data
             end
         end
     end

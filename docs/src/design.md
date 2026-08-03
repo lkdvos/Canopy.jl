@@ -108,7 +108,7 @@ struct BPMessages{T <: Number, S <: IndexSpace, A <: DenseVector{T}, V}
 end
 ```
 
-There is no explicit vertex field — the vertex set is induced by the directed-edge keys, which in turn come from the state. The full geometric convention is documented at the top of `src/messages.jl`; the structural facts are repeated here.
+There is no explicit vertex field — the vertex set is induced by the directed-edge keys, which in turn come from the state.
 
 ### Message types and spaces
 
@@ -118,6 +118,12 @@ A directed edge `e = (s, r)` is read as *sender → receiver*. The message `msgs
 - the `v → u` message has space `V_e ← V_e`.
 
 The codomain (bra layer) and domain (ket layer) carry the same vector space; `attach_messages` contracts the domain against `state[r]`'s ket virtual leg and exposes the codomain in its place.
+
+In the double-layer picture a message is the partial trace of the environment outside the receiver, projected onto the bond: codomain = bra index, domain = ket index. On a tree the BP fixed point coincides with this exact environment; on graphs with loops it is the loop-free (Bethe) approximation.
+
+### Normalization
+
+Messages are defined only up to an overall scale — BP constrains them up to a multiplicative constant per directed edge. The convention is trace normalization: `compute_message` returns the new message normalized by its trace, and `tr_distance` compares two messages after trace-normalizing both, so it ignores any overall rescaling.
 
 ### Identity initialization
 
@@ -215,6 +221,155 @@ purification — slot 1 physical, slot 2 ancilla — and return the marginal of 
 which is the object belief propagation already converges the environment of. The state and
 operator contractions are one pair of methods parameterized by `num_physical`: the operator
 simply closes its second physical leg against its own adjoint inside the same `ncon`.
+
+## The vertex-batched message kernel
+
+All messages leaving a vertex `v` close `state[v]` against `state[v]'` with the same
+incoming messages absorbed leave-one-out, so they share work. Two formulations of that
+contraction live in `src/messages.jl`, and an ordinary backend selects between them
+**The blocked one runs unconditionally** — there is no selection rule. `PairwiseBackend`
+forces the oracle, which is how the two are differentially tested against each other.
+
+**Pairwise.** A ket prefix chain and a bra suffix chain, so each incoming message is
+absorbed about twice in total rather than once per output. Only the prefix up to the largest
+target and the suffix down to the smallest are built, so a clustered subset of targets costs
+proportionally less. This is the differential-test oracle and nothing else: it is no longer
+reached in production at all. The selection rule it used to share with the blocked kernel
+carried four conditions, every one of which was removed — three by measuring an argument
+that had only been asserted — and [`Canopy.PairwiseBackend`](@ref) records each and why.
+The last to go was `A <: Array`, so **GPU storage now takes the blocked kernel with no GPU
+test anywhere in the suite**: no known defect, but unverified, and the CPU A/B does not
+transfer automatically because blocked trades one fused contraction per chain step for a
+composition plus a relayout, and each composition is one gemm per coupled sector.
+
+Non-symmetric braiding is **not** a fallback case: it is rejected outright, because belief
+propagation cannot support it in either formulation. Every primitive the blocked chain uses
+succeeds under anyonic braiding — `permute`/`tensoradd!` and `mul!` both work on
+`Vect[FibonacciAnyon]` — but the sign derivation below folds twists using `twist(σ)² = 1`,
+which is false there (`twist(τ)² ≈ 0.309 + 0.951im`), so the kernel would run to completion
+and return wrong numbers. `_require_symmetric_braiding` raises a `SectorMismatch` naming
+that reason. The pairwise kernel happens to be safe only by accident: TensorKit's
+`tensorcontract!` refuses non-symmetric braiding on its own.
+
+**Blocked (`Layout(k)`).** One layout family for both chains, with the target leg alone in
+the **domain**:
+
+```
+Layout(k) = (phys, ℓ₁ … ℓ̂ₖ … ℓ_N) ← (ℓₖ)
+```
+
+Three consequences follow, and they are the whole reason this formulation is faster:
+
+1. `Layout(k) → Layout(k±1)` is a single transposition of axes `k+1` and `M`, so there is
+   one copy-kernel shape for both chains and every step;
+2. the absorbed leg is always the sole domain leg, so every absorption is a composition —
+   one `gemm` per coupled sector, and no repartition of the link (the pairwise ket chain
+   pays a full `dim(T)` copy per step for exactly that);
+3. the closing `adjoint(S_k) * P_k` is one `gemm('C','N')` per coupled sector writing the
+   output message in its **natural** partition, removing both the `copyC` repartition and
+   the `twist!` copy of the link that the pairwise closing forces.
+
+Copy passes over `dim(T)`: `2d` for blocked (two entry braids plus one per chain step)
+against `≈4d - 2` plus `2d` `twist!` passes for pairwise.
+
+That copy accounting is what decides the comparison, and it is worth being explicit about
+because it also settles the one case that looked like an exception. `Trivial` tensors take
+TensorKit's `has_array_view` short-circuit — `sectortype(T) === Trivial` makes `tensoradd!`
+and `tensorcontract!` delegate to plain-array TensorOperations on `t[]` views — and the
+blocked kernel was excluded there on the argument that this could not be beaten. Measured,
+it loses anyway: blocked is **1.10-1.17× faster** on `Trivial` over χ ∈ 32…128. The
+short-circuit does save pairwise the fusion-tree overhead (10 `tensoralloc` calls against
+17 on a graded fixture, while blocked issues 13 either way) but it does not make the index
+permutations free, so the `2d` vs `≈4d - 2` difference survives — and `Trivial` is where a
+pass costs most in absolute terms, since no symmetry reduces the tensor.
+
+The blocked kernel's other three advantages *are* inoperative for `Trivial`: one
+copy-kernel shape for every relayout needs many subblocks, folding twists into χ²-sized
+messages needs non-trivial twists (every `Trivial` twist is `+1`, so there was no `twist!`
+pass to remove), and the closing's saved repartition is χ²-sized against a `dim(T)` of
+millions. The surviving copy-count advantage is enough on its own.
+
+### Physical arity
+
+The chain threads `np = numout(T)` through its slot arithmetic: virtual leg `k` sits at
+tensor slot `np + k`, a `Layout` has `M - 1` codomain axes and one domain axis whatever `np`
+is, and `Z`'s physical factor becomes one `twist(σ_p)` per *dual* physical leg instead of a
+single conditional twist. The closing needs nothing: it contracts every leg but the target,
+so it never sees the arity.
+
+This removes an assumption rather than enabling a feature, and the `np > 1` path is
+**unexercised**. `StateTensor` is `TensorMap{T, S, 1, N, A}`, so a `TensorNetworkState` has
+exactly one physical leg by construction, and a `TensorNetworkOperator` reaches BP through
+the fused view of `TensorNetworkState(op)`, which is also `numout == 1`. Nothing can supply
+a two-physical-leg tensor to the kernel, so there is no differential fixture to test it
+with — only a predicate-level assertion. Routing operators to BP *unfused* would make it
+live, and would drop the fused view's documented dependence on TensorKit's internal block
+layout, but that trade was considered and declined.
+
+### Fermionic signs in the blocked kernel
+
+`TensorKit`'s `blas_contract!` is "permute `A` to `pA`, permute `B` to `pB`, compose, and
+apply `twist(σ_ℓ)` once per contracted leg pair that is **dual on the `B` side**". `mul!` is
+the bare composition, so a contraction written with `mul!` is short exactly that factor.
+With `σ_ℓ` the sector on leg `ℓ` of `T` (`ℓ = 1` physical, `ℓ = j + 1` virtual leg `j`):
+
+- absorption of message `j` (`A` = link, `B` = message, `cindB = (2,)`, and
+  `space(msg, 2) == dual(space(T, j+1))`) is missing `twist(σⱼ)` iff `!isdual(space(T, j+1))`;
+- the closing at target `k` (`A = adjoint(S_k)`, `B = P_k`, `cindB` = every leg but `k+1`)
+  is missing `∏_{ℓ ≠ k+1, isdual(space(T, ℓ))} twist(σ_ℓ)`.
+
+Both are diagonal in `σ`, and `σ` is invariant along either chain — messages are
+sector-diagonal and the braids only relabel axes — so the two combine into one per-`σ`
+scalar. Writing `Z(σ) = ∏_{ℓ : isdual(space(T, ℓ))} twist(σ_ℓ)` and using `twist(σ)² = 1`
+(which needs `SymmetricBraiding`, **not** abelian fusion — see
+[`Canopy.PairwiseBackend`](@ref)), the total correction for target `k` is
+
+```
+Z(σ) · twist(σₖ)^{[isdual(space(T, k+1))]}
+    = twist(σ_phys)^{[isdual(space(T, 1))]} · ∏_{j ≠ k} twist(σⱼ)
+```
+
+Every leg `j ≠ k` is absorbed exactly once for target `k` (ket chain if `j < k`, bra chain if
+`j > k`), so `twist(σⱼ)` folds into the **transposed message** — a χ²-sized pass — and the
+only remainder is the physical leg, folded into the ket entry copy when the physical space
+is dual. Padded legs carry the unit sector and drop out. Net: no `twist!` pass over any
+chain link and none on the output.
+
+### Measured dead ends
+
+Three reformulations were tried, measured, and rejected. They are recorded because each one
+looks like an obvious improvement:
+
+- **Redistributing the twists.** Folding all of `Z` into the ket entry, twisting message `j`
+  only when `!isdual(space(T, j+1))`, and finishing with `twist!(out[i], (1,))` is the *same
+  scalar distributed differently* and agrees numerically. It is slower: the factor is
+  per-subblock and `tensoradd!` takes only a scalar `α`, so it needs a separate `twist!` pass
+  over `dim(T)` that otherwise runs only in the rare dual-physical case — trading `d`
+  χ²-sized scalings for one `dim(T)`-sized one.
+- **Fusing the chain step's composition and re-permutation.** Writing a chain step as a
+  single `tensorcontract!` does **not** fuse them. The step's permutation exchanges a
+  codomain axis with the lone domain axis, so `TO.isblasdestination` is `false`,
+  `blas_contract!` takes `copyC`, and it allocates the very same `dim(T)` intermediate and
+  pays the very same second pass. Interleaved A/B over
+  `{z2, fz2, fz2_u1, fz2_u1_flat} × χ ∈ {8, 32, 64}`: the fused form is **0.3-9.8 % slower**
+  at every point, never faster, the cost being `tensorcontract!`'s contraction-candidate
+  dispatch. It can also be worse: when the contracted leg is dual on the message side,
+  `blas_contract!` twists — and therefore copies — the message itself, duplicating a twist
+  already folded in.
+- **Transposing the messages inside each chain** rather than hoisting them. `tensoradd!`
+  *from* an `AdjointTensorMap` misses TensorKit's flat-data fast path and falls back to the
+  generic kernel, which reaches both operands through `t[f₁, f₂]` once per fusion tree.
+  Hoisting also transposes a leg absorbed by both chains once instead of twice.
+
+Sharing one transposed tensor between the two chains rests on
+`twist(permute(m', pmsg), 1) == adjoint(twist(permute(m, pmsg), 1))`, which holds exactly —
+not merely to rounding — for all four duality patterns of a `1 ← 1` message, because
+messages are sector-diagonal so both indices carry the same sector and the twist is the same
+real `±1` either way.
+
+Quantitative results, the fixtures behind them, and the threading work built on this kernel
+live in `benchmark/reports/` — `backend_ab.md` for the blocked-vs-pairwise ratios,
+`subblock_probe.md` for the threading verdict and its implementation brief.
 
 ## Open questions / future work
 

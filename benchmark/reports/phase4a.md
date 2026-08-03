@@ -14,8 +14,10 @@ criteria at the production symmetry, and a perfect plan cache is worth ≤1.08×
 χ ≥ 32 and nothing at χ ≥ 64.
 
 Generated from `benchmark/blockloop_probe.jl` (Part A) and
-`benchmark/plancache_probe.jl` (Part B). Raw per-thread tables are in
-`blockloop_probe_t{1,2,4,8}.md` and `plancache_probe.md`. No `src/` changes.
+`benchmark/plancache_probe.jl` (Part B); raw Part B tables in `plancache_probe.md`. No
+`src/` changes. The Part A per-thread raw tables were removed once the threading question
+was resettled by `subblock_probe.md`; every figure they are cited for is inlined below,
+and re-running the probe regenerates them.
 
 - host `ccqlin038.flatironinstitute.org` · cascadelake · 32 cores · julia 1.12.6
 - git sha `31494ee` · `BLAS.set_num_threads(1)` · `OPENBLAS_NUM_THREADS=1`
@@ -130,8 +132,7 @@ Two structural facts that decide the rest of Part A:
 
 ## M2 — probe timings
 
-Interleaved arms, `nthreads` ∈ {1,2,4,8}. Full tables in
-`blockloop_probe_t{1,2,4,8}.md`; summary here.
+Interleaved arms, `nthreads` ∈ {1,2,4,8}.
 
 ### Amdahl ceiling `t_block_loop / t_kernel`
 
@@ -247,7 +248,7 @@ before being relied on:
 | fz2 | 128 | yes | 191106 | 188192 | 182369 | 182802 | 1.05× |
 
 At 2 and 4 threads the knob is a **pessimization** on the graded fixtures at
-χ = 64 (up to 1.4× slower at TT = 2 — see `blockloop_probe_t2.md`); it only pays
+χ = 64 (up to 1.4× slower at TT = 2); it only pays
 when `TT == nthreads` and the tensor is large.
 
 **Audit of the single-buffer assumption the plan flagged.** For `UniqueFusion` —

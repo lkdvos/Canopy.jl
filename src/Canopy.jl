@@ -34,7 +34,7 @@ using OpenQASM.Types: RegDecl, Include, Gate, Instruction, UGate, CXGate, Barrie
 
 include("bumper.jl")
 include("backends.jl")
-export BlockedBackend, PairwiseBackend
+export PairwiseBackend
 
 include("edges.jl")
 

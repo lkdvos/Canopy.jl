@@ -512,7 +512,7 @@ function probe_row(sym::Symbol, χ::Int; reps = PROBE_REPS, inner = PROBE_INNER)
     )
 
     # compile every arm
-    compute_message!(out, msgs, state, edges, BlockedBackend(), buf)
+    compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf)
     loop_serial(js); loop_spawn(js, nt); loop_tforeach(js, nt)
     loop_spawn_grouped(js, nt); loop_tforeach_grouped(js, nt)
     spawn_roundtrip(1); spawn_roundtrip(nt)
@@ -520,7 +520,7 @@ function probe_row(sym::Symbol, χ::Int; reps = PROBE_REPS, inner = PROBE_INNER)
     tk = Float64[]; ts = Float64[]; ts2 = Float64[]; tsp = Float64[]
     tfn = Float64[]; tspg = Float64[]; tfg = Float64[]; r1 = Float64[]; rn = Float64[]
     for _ in 1:reps
-        push!(tk, best(() -> compute_message!(out, msgs, state, edges, BlockedBackend(), buf), inner))
+        push!(tk, best(() -> compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf), inner))
         push!(ts, best(() -> loop_serial(js), inner))
         push!(tsp, best(() -> loop_spawn(js, nt), inner))
         push!(tfn, best(() -> loop_tforeach(js, nt), inner))
@@ -599,7 +599,7 @@ function upstream_row(sym::Symbol, χ::Int; reps = PROBE_REPS, inner = PROBE_INN
     T = state[HEX_VERTEX]
     eligible = length(T.data) > 32768
 
-    call() = compute_message!(out, msgs, state, edges, BlockedBackend(), buf)
+    call() = compute_message!(out, msgs, state, edges, TO.DefaultBackend(), buf)
     call()
     acc = Dict(n => Float64[] for n in ns)
     tbs = Float64[]
