@@ -21,38 +21,51 @@ end
 # Graph helpers
 # -------------
 
-# Randomized BFS spanning tree over the network's own adjacency. Returns the BFS
-# vertex order (root first), the `parent` map (root absent), and the cotree
-# (loop-closing) undirected edges. Assumes a connected network.
-function random_spanning_tree(state::AbstractTensorNetwork, rng)
+# Randomized BFS vertex order over the network's own adjacency, as
+# `(order, pos)` with `pos[order[i]] == i`. Component roots are visited in a
+# random order and each vertex's neighbours are shuffled, so a fresh order is
+# drawn on every call.
+#
+# BFS is *restarted per connected component*, i.e. this spans a forest rather
+# than a tree. [`SpanningTreeSchedule`](@ref) drives every vertex from `order`,
+# so a single-rooted BFS would silently leave a disconnected network's other
+# components untouched — their residuals would stay `Inf` and `StopWhenStable`
+# would never fire.
+#
+# `pos` doubles as the visited marker, and the invariant callers rely on is that
+# every vertex other than its component's root has at least one neighbour with a
+# strictly smaller `pos` (its BFS parent).
+function random_bfs_order(state::AbstractTensorNetwork, rng)
     V = keytype(state)
-    verts = collect(vertices(state))
-    root = rand(rng, verts)
-    parent = Dictionary{V, V}()
-    visited = Set{V}((root,))
-    order = V[root]
-    tree_edges = Set{UndirectedEdge{V}}()
+    roots = collect(vertices(state))
+    Random.shuffle!(rng, roots)
+    order = V[]
+    sizehint!(order, length(roots))
+    pos = Dictionary{V, Int}()
     head = 1
-    while head <= length(order)
-        v = order[head]
-        head += 1
-        nbrs = collect(neighbors(state, v))
-        Random.shuffle!(rng, nbrs)
-        for n in nbrs
-            n in visited && continue
-            push!(visited, n)
-            insert!(parent, n, v)
-            push!(tree_edges, UndirectedEdge(v, n))
-            push!(order, n)
+    for root in roots
+        haskey(pos, root) && continue
+        insert!(pos, root, length(order) + 1)
+        push!(order, root)
+        while head <= length(order)
+            v = order[head]
+            head += 1
+            nbrs = collect(neighbors(state, v))
+            Random.shuffle!(rng, nbrs)
+            for n in nbrs
+                haskey(pos, n) && continue
+                insert!(pos, n, length(order) + 1)
+                push!(order, n)
+            end
         end
     end
-    cotree = [e for e in edges(state) if !(e in tree_edges)]
-    return order, parent, cotree
+    return order, pos
 end
 
 # Height-limited BFS from `root` (height counted in edges from root). Returns the
 # BFS vertex order (root first) and the `parent` map (root absent). Modeled on
-# the BFS loop in `random_spanning_tree`, but deterministic and depth-bounded.
+# the BFS loop in `random_bfs_order`, but deterministic, depth-bounded, and
+# single-rooted (a splash is local by construction).
 function bfs_tree(network::AbstractTensorNetwork, root, height::Int)
     V = keytype(network)
     parent = Dictionary{V, V}()

@@ -1,14 +1,18 @@
 """
     SynchronousSchedule()
 
-Default schedule: every message is recomputed from the previous iterate and the
-whole set is swapped in at once. No update within a sweep sees a freshly-computed
-neighbor message. Exact on trees in a single sweep per tree depth.
+Jacobi-style schedule: every message is recomputed from the previous iterate and
+the whole set is swapped in at once. No update within a sweep sees a
+freshly-computed neighbor message, so information travels one edge per sweep and a
+tree needs as many sweeps as its depth — the default
+[`SpanningTreeSchedule`](@ref) is exact on a tree in one. Alone among the
+schedules it leaves the input messages untouched, returning a fresh container
+instead.
 """
 struct SynchronousSchedule <: BPSchedule end
 
-# Synchronous (default): recompute every message from the previous iterate and
-# swap the whole set in at once.
+# Synchronous: recompute every message from the previous iterate and swap the
+# whole set in at once.
 function update_messages!(
         ::SynchronousSchedule, problem::BPProblem, alg::BeliefPropagation, state::BPState
     )

@@ -1,49 +1,11 @@
-# --- BP message conventions ---------------------------------------------------
+# BP messages live on the *directed* graph: each undirected edge `(u, v)` carries
+# `DirectedEdge(u, v)` and `DirectedEdge(v, u)`. A directed edge `(s, r)` is read
+# `sender → receiver`; `msgs[e]` lives on the receiver's side of the bond, with space
+# `V_r ← V_r`, codomain = bra index and domain = ket index.
 #
-# Belief-propagation messages live on the *directed* version of the state's
-# graph. For every undirected edge `(u, v)` of `state` there are two directed
-# edges and two messages:
-#
-#     DirectedEdge(u, v)   "message from sender u to receiver v"
-#     DirectedEdge(v, u)   "message from sender v to receiver u"
-#
-# ## Geometry
-#
-# A directed edge `e = (s, r)` is read as `sender → receiver`. The message
-# `msgs[e]` lives on the **receiver's** side of the underlying bond, i.e. on
-# the virtual leg of `state[r]` that points to `s`. With
-# `V_r = virtualspace(state, DirectedEdge(r, s))` (the bond space as seen
-# from r), every message has TensorKit space `V_r ← V_r`.
-#
-# ## Codomain / domain
-#
-# Treating a message as a linear map `V_r → V_r`:
-#
-# - the **domain** (ket-layer) leg contracts against the ket virtual leg of
-#   `state[r]` at this bond — this is what [`attach_messages`](@ref) does;
-# - the **codomain** (bra-layer) leg takes the place of that ket virtual
-#   leg in the modified site tensor, so a subsequent contraction with the
-#   bra `state[r]'` closes the BP environment.
-#
-# In the double-layer picture, a message is the partial trace of the
-# environment outside the receiver projected onto the bond: codomain = bra
-# index, domain = ket index. On a tree the BP fixed point coincides with
-# this exact environment; on graphs with loops it is the loop-free
-# (Bethe) approximation.
-#
-# ## Normalization
-#
-# Messages are defined up to overall scale (BP only constrains them up to a
-# multiplicative constant per directed edge). The convention used here is
-# trace normalization: [`compute_message`](@ref) returns the new message
-# normalized by its trace, and [`tr_distance`](@ref) compares two messages
-# after trace-normalising both — i.e. it ignores any overall rescaling.
-#
-# ## Identity initialization
-#
-# `BPMessages(state)` initialises every message to the identity on its
-# receiver-side space. This is the natural starting point for BP and is
-# *exact* on trees: a single sweep along the tree reaches the fixed point.
+# The geometric convention, its double-layer meaning, the trace-normalization
+# convention and the two `compute_message!` formulations are documented in
+# `docs/src/design.md` ("BP messages" and "The vertex-batched message kernel").
 
 const MessageTensor{T <: Number, S <: IndexSpace, A <: DenseVector{T}} =
     TensorMap{T, S, 1, 1, A}
@@ -56,10 +18,8 @@ keys of type `V`. Each undirected state edge contributes two entries — one
 per direction — stored in a `Dictionary` keyed by `DirectedEdge{V}`.
 
 Every message is a `TensorMap{T, S, 1, 1, A}` of space `V_r ← V_r`, where
-`V_r` is the virtual-leg space of the *receiver* at that bond. See the
-file header for the geometric convention (sender → receiver, codomain =
-bra, domain = ket) used by [`attach_messages`](@ref) and
-[`compute_message`](@ref).
+`V_r` is the virtual-leg space of the *receiver* at that bond, with codomain =
+bra index and domain = ket index.
 """
 struct BPMessages{T <: Number, S <: IndexSpace, A <: DenseVector{T}, V}
     messages::Dictionary{DirectedEdge{V}, MessageTensor{T, S, A}}
@@ -72,8 +32,7 @@ Allocate a `BPMessages` for `state` with every directed edge initialized to
 the identity on the receiver's side of the underlying undirected edge.
 
 This is the standard BP starting point and is *exact* on trees (one sweep
-reaches the fixed point). See the file header for the message-space
-convention.
+reaches the fixed point).
 """
 function BPMessages(state::TensorNetworkState)
     K = DirectedEdge{keytype(state)}
@@ -129,8 +88,7 @@ Return `true` if `messages` is structurally compatible with `state`:
 
 - every undirected edge of `state` has both directed messages present;
 - each message has space `V_r ← V_r`, where `V_r` is the virtual-leg
-  space of the receiver (`last(edge)`) at that bond — i.e. the messages
-  follow the sender→receiver convention documented at the top of this file.
+  space of the receiver (`last(edge)`) at that bond.
 
 Does not check that the messages are a BP fixed point; only that their
 spaces line up with `state`.
@@ -163,6 +121,7 @@ function _mul_leg!(
         dst::TensorMap{<:Any, S, NP, N}, src::TensorMap{<:Any, S, NP, N}, L, k::Int,
         backend, allocator,
     ) where {S, NP, N}
+    backend = inner_backend(backend)
     M = NP + N
     d = NP + k
     oindA = TupleTools.deleteat(ntuple(identity, M), d)
@@ -183,6 +142,7 @@ function _mul_leg!(
 end
 
 function _absorb_legs(T::TensorMap{Tn, S, NP, N, A}, leg_factors, backend, allocator) where {Tn, S, NP, N, A}
+    backend = inner_backend(backend)
     factors = collect(leg_factors)
     isempty(factors) && return copy(T)
     M = NP + N
@@ -306,6 +266,7 @@ function compute_message!(
         msg, msgs::BPMessages, state::TensorNetworkState, edge::DirectedEdge,
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
+    backend = inner_backend(backend)
     site = first(edge)
     target = leg_index(state, edge)
     T = state[site]
@@ -345,6 +306,12 @@ total rather than once per output); only the chain segments spanning the
 requested targets are built, so a small subset costs proportionally less. Like
 the single-edge method, neither variant mutates `msgs` nor normalises the result;
 `compute_message` allocates the output vector, `compute_message!` fills `out`.
+
+Two formulations of the same contraction are implemented: the *pairwise* one described
+above, and the `Layout(k)` *blocked* one further down this file, which has fewer copy
+passes and folds the fermionic signs into the (χ²-sized) messages. **The blocked one runs
+unconditionally**; [`PairwiseBackend`](@ref) forces the pairwise one, which is how the two
+are differentially tested against each other. See `docs/src/design.md`.
 """
 function compute_message(
         msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
@@ -361,6 +328,7 @@ end
 # contraction's one output pass so the active leg stays matrix-form for the next
 # step. `_repartition` does the same for a bare on-site tensor (native order, no msg).
 function _absorb(link, legs, absorbed::Int, msg, newlegs, ncod::Int, backend, allocator)
+    backend = inner_backend(backend)
     M = numind(link)
     ax = findfirst(==(absorbed), legs)
     kept = TupleTools.deleteat(ntuple(identity, M), ax)
@@ -380,6 +348,7 @@ function _absorb(link, legs, absorbed::Int, msg, newlegs, ncod::Int, backend, al
 end
 
 function _repartition(tensor, newlegs, ncod::Int, backend, allocator)
+    backend = inner_backend(backend)
     M = numind(tensor)
     pC = (ntuple(i -> newlegs[i], ncod), ntuple(i -> newlegs[ncod + i], M - ncod))
     result = tensoralloc_add(scalartype(tensor), tensor, pC, false, Val(true), allocator)
@@ -389,18 +358,33 @@ function _repartition(tensor, newlegs, ncod::Int, backend, allocator)
     return result
 end
 
-# Shared leave-one-out: `prefix[k]` absorbs virtual legs 1..k-1, `suffix[k]`
-# absorbs k+1..d (adjoint messages), and the closing contracts them over the
-# physical leg and every virtual leg ≠ k — the `compute_message!` sandwich. Links
-# are pre-partitioned so each closing is a direct block GEMM with no repartition,
-# and bump-allocated under one checkpoint freed at the end. Only the prefix up to
-# the largest target and the suffix down to the smallest are built, so a clustered
-# subset costs proportionally less than all `d` outputs.
 function compute_message!(
         out, msgs::BPMessages, state::TensorNetworkState, edges::AbstractVector{<:DirectedEdge},
         backend = DefaultBackend(), allocator = default_allocator(state),
     )
     isempty(edges) && return out
+    return _blocked_message!(out, msgs, state, edges, inner_backend(backend), allocator)
+end
+
+function compute_message!(
+        out, msgs::BPMessages, state::TensorNetworkState,
+        edges::AbstractVector{<:DirectedEdge}, backend::PairwiseBackend,
+        allocator = default_allocator(state),
+    )
+    isempty(edges) && return out
+    return _pairwise_message!(out, msgs, state, edges, inner_backend(backend), allocator)
+end
+
+# Shared leave-one-out: `prefix[k]` absorbs virtual legs 1..k-1, `suffix[k]` absorbs
+# k+1..d (adjoint messages), and the closing contracts them over the physical leg and
+# every virtual leg ≠ k. Only the prefix up to the largest target and the suffix down to
+# the smallest are built, so a clustered subset costs proportionally less.
+#
+# The differential-test oracle, reached only through `PairwiseBackend`.
+function _pairwise_message!(
+        out, msgs::BPMessages, state::TensorNetworkState,
+        edges::AbstractVector{<:DirectedEdge}, backend, allocator,
+    )
     v = first(first(edges))
     T = state[v]
     M = numind(T)
@@ -444,6 +428,183 @@ function compute_message!(
             ((2,), (1,)), One(), Zero(), backend, allocator
         )
         allocator_reset!(allocator, cp_close)
+    end
+
+    allocator_reset!(allocator, cp)
+    return out
+end
+
+# BP requires **symmetric braiding**, and this is the one place that has to say so out
+# loud. Every primitive the blocked chain uses succeeds under anyonic braiding, but the
+# fermionic-sign derivation folds `twist(σ)` factors using `twist(σ)² = 1`, which is false
+# there — so without this check the kernel would run to completion and return **wrong
+# numbers silently**. The pairwise kernel is safe by accident: TensorKit's
+# `tensorcontract!` refuses non-symmetric braiding outright.
+function _require_symmetric_braiding(t)
+    I = sectortype(t)
+    BraidingStyle(I) isa SymmetricBraiding || throw(
+        SectorMismatch(
+            lazy"belief propagation requires symmetric braiding, got $(BraidingStyle(I)) \
+                 for sector type $I: the message kernel's fermionic-sign derivation uses \
+                 twist(σ)² = 1, which only holds for symmetric braiding"
+        )
+    )
+    return nothing
+end
+
+# --- blocked (`Layout(k)`) vertex-batched kernel -------------------------------
+#
+# Same mathematics as the pairwise kernel above, one layout family for both chains with
+# the target leg alone in the domain:
+#
+#     Layout(k) = (phys, l1 ... lk-hat ... lN) <- (lk)
+#
+# so a relayout is a single transposition, every absorption is a composition (one `gemm`
+# per coupled sector, no repartition of the link), and the closing writes the output
+# message in its natural partition. Fermionic signs fold into the (chi^2-sized) transposed
+# messages and the ket entry copy instead of costing `twist!` passes over the chain links.
+#
+# **Read `docs/src/design.md` before changing the sign handling or the chain step.** It
+# carries the sign derivation and three reformulations that were measured and rejected;
+# each looks like an obvious improvement and each is slower.
+
+# `twist!(mt, (1,))` for a message-shaped (`1 ← 1`) tensor, without the per-subblock
+# hashed lookup: a `1 ← 1` tensor has one fusion tree pair per coupled sector and a
+# single-leg tree's uncoupled sector *is* its coupled one, so scaling `blocks(mt)` by
+# `twist(c)` is the same operation with one structure lookup for the whole tensor rather
+# than the two `GlobalLRUCache` lookups `t[f₁, f₂]` costs per sector.
+function _twist_message!(mt)
+    for (c, b) in blocks(mt)
+        θ = twist(c)
+        isone(θ) || scale!(b, θ)
+    end
+    return mt
+end
+
+# Incoming message `j` in composable form: transposed to `pmsg = ((2,), (1,))`
+# so that composition contracts its ket index and leaves its bra index as the
+# new leg, and twisted on its codomain leg — the per-coupled-sector `twist(σⱼ)`
+# derived above, at χ² cost.
+function _transposed_message(msg, pmsg, backend, allocator)
+    mt = tensoralloc_add(scalartype(msg), msg, pmsg, false, Val(true), allocator)
+    tensoradd!(mt, msg, pmsg, false, One(), Zero(), backend, allocator)
+    return _twist_message!(mt)
+end
+
+# The transposed messages, hoisted out of both chains: `msgt[j]` is absorbed by the ket
+# chain (`j < legmax`) and `adjoint(msgt[j])` by the bra chain (`j > legmin`). `nothing`
+# when neither chain takes a step (`d == 1`). Cost of holding them is `d` χ²-sized buffers
+# against the `≈2d` links of `dim(P)·χ^d` the chains already hold live. Why one tensor can
+# be shared between the chains, and why hoisting beats transposing inside them:
+# `docs/src/design.md`.
+function _transposed_messages(incoming, legmin, legmax, pmsg, backend, allocator)
+    d = length(incoming)
+    absorbed(j) = j < legmax || j > legmin
+    j0 = findfirst(absorbed, 1:d)
+    isnothing(j0) && return nothing
+    mt = _transposed_message(incoming[j0], pmsg, backend, allocator)
+    msgt = Vector{typeof(mt)}(undef, d)
+    msgt[j0] = mt
+    for j in (j0 + 1):d
+        absorbed(j) || continue
+        msgt[j] = _transposed_message(incoming[j], pmsg, backend, allocator)
+    end
+    return msgt
+end
+
+# One chain step: absorb the composable message `mt` (or its adjoint, on the bra chain)
+# into the sole domain leg of the `Layout` link and re-emit in the neighbouring layout, `p`
+# being the axis transposition. One `gemm` per coupled sector with no copy of `link` (`pid`
+# is `link`'s own partition and only sizes the output buffer); `tmp` is taken above a
+# checkpoint and released before returning, so only the chain links stay live.
+#
+# `mul!` cannot write into a differently-partitioned destination, hence the separate
+# re-permute. **Do not try to fuse them into one `tensorcontract!`** — measured 0.3-9.8%
+# slower at every point; `docs/src/design.md` has the reason.
+function _blocked_step(link, mt, pid, p, backend, allocator)
+    result = tensoralloc_add(scalartype(link), link, p, false, Val(true), allocator)
+    cp = allocator_checkpoint!(allocator)
+    tmp = tensoralloc_add(scalartype(link), link, pid, false, Val(true), allocator)
+    mul!(tmp, link, mt)
+    tensoradd!(result, tmp, p, false, One(), Zero(), backend, allocator)
+    allocator_reset!(allocator, cp)
+    return result
+end
+
+# `T` relaid out into `Layout(k)` — the entry link of either chain.
+function _chain_entry(T, p, backend, allocator)
+    link = tensoralloc_add(scalartype(T), T, p, false, Val(true), allocator)
+    tensoradd!(link, T, p, false, One(), Zero(), backend, allocator)
+    return link
+end
+
+function _blocked_message!(
+        out, msgs::BPMessages, state::TensorNetworkState,
+        edges::AbstractVector{<:DirectedEdge}, backend, allocator,
+    )
+    v = first(first(edges))
+    T = state[v]
+    _require_symmetric_braiding(T)
+    M = numind(T)
+    np = numout(T)
+    nbrs = neighbors(state, v)
+    d = length(nbrs)
+    target_legs = map(edges) do e
+        first(e) == v || throw(ArgumentError(lazy"edge $e does not leave the shared source $v"))
+        return leg_index(state, e)
+    end
+    legmin, legmax = extrema(target_legs)
+
+    # Every space query is hoisted here: the loops below touch only tensors.
+    #
+    # Virtual leg `k` sits at tensor slot `np + k`, and a `Layout` has `M - 1` codomain
+    # axes and one domain axis whatever `np` is, so only the slot arithmetic depends on
+    # the physical arity. In `Layout(k)`'s own axis order the leg a chain step moves into
+    # the domain is at position `np + k` for both chains: on the ket side the legs before
+    # `k + 1` skip `k`, and on the bra side (source `Layout(k+1)`) nothing before `k` is.
+    #
+    # `np > 1` is threaded through but **not exercised** — nothing can currently supply a
+    # two-physical-leg tensor. See `docs/src/design.md`, "Physical arity".
+    allinds = ntuple(identity, M)
+    layout(k) = (TupleTools.deleteat(allinds, np + k), (np + k,))   # Layout(k)
+    pid = (ntuple(identity, M - 1), (M,))                          # a layout's own partition
+    pswap(j) = (ntuple(i -> ifelse(i == j, M, i), M - 1), (j,))     # Layout(j-1) ↔ Layout(j)
+    pmsg = ((2,), (1,))                                            # message → composable form
+    # `Z`'s physical factor: one `twist(σ_p)` per *dual* physical leg. `twist!` applies the
+    # product of the given legs in a single pass.
+    dual_phys = filter(p -> isdual(space(T, p)), ntuple(identity, np))
+
+    incoming = map(n -> msgs[DirectedEdge(n, v)], nbrs)
+
+    cp = allocator_checkpoint!(allocator)
+
+    # the messages both chains absorb, in composable form, built once per leg
+    msgt = _transposed_messages(incoming, legmin, legmax, pmsg, backend, allocator)
+
+    # ket chain, `Layout(1)` up to `Layout(legmax)`: `ket[k]` has messages 1 … k-1
+    # absorbed. Both chains share a link type, read off the first entry so the
+    # containers are concrete and GPU-portable.
+    ket1 = _chain_entry(T, layout(1), backend, allocator)
+    isempty(dual_phys) || twist!(ket1, dual_phys)   # the physical legs' `Z` factor
+    ket = Vector{typeof(ket1)}(undef, d)
+    ket[1] = ket1
+    for k in 1:(legmax - 1)
+        ket[k + 1] = _blocked_step(ket[k], msgt[k], pid, pswap(np + k), backend, allocator)
+    end
+
+    # bra chain, `Layout(d)` down to `Layout(legmin)`: `bra[k]` has messages
+    # k+1 … d absorbed, as adjoints — conjugated by the closing.
+    bra = Vector{typeof(ket1)}(undef, d)
+    bra[d] = _chain_entry(T, layout(d), backend, allocator)
+    for k in (d - 1):-1:legmin
+        bra[k] = _blocked_step(
+            bra[k + 1], adjoint(msgt[k + 1]), pid, pswap(np + k), backend, allocator
+        )
+    end
+
+    # closing: one `gemm('C', 'N')` per coupled sector, straight into `out[i]`.
+    for (i, k) in enumerate(target_legs)
+        mul!(out[i], adjoint(bra[k]), ket[k])
     end
 
     allocator_reset!(allocator, cp)

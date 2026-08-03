@@ -65,6 +65,9 @@ function _2site_kernel!(
         trunc = notrunc(), gauge_tol::Real = default_gauge_tol(state), normp::Real = 2,
         timer = nothing, backend = DefaultBackend(), allocator = default_allocator(state),
     ) where {F}
+    # `apply!` has no blocked variant; unwrap a kernel selector here so the
+    # `@tensor` gate contraction below sees a real TensorOperations backend.
+    backend = inner_backend(backend)
     return @maybe_timeit timer "apply! 2-site" begin
         gatesites = sites(gate)
         s₁, s₂ = gatesites
