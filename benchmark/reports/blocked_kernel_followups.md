@@ -10,7 +10,73 @@ State at time of writing: `symmetry-kernel`, PR #27 (draft), rebased onto `#26`.
 
 ---
 
-## 1. The `UniqueFusion` gate is probably unnecessary — drop it after testing
+> **STATUS (updated after acting on §1 and §2).**
+> **§1 is DONE** — the gate is dropped, non-abelian is tested and passes. **§2 is
+> MEASURED and it is a GO above χ = 64**: 5.46× on the message kernel at the production
+> point, against §2's own predicted 2.3× cap, which this design beats because it threads
+> the copies as well as the gemms. See `subblock_probe.md` for the verdict and
+> `subblock_probe_t{1,8}.md` for raw tables. Three claims in §2 below are **wrong** and
+> are corrected inline: the 2.3× ceiling, the "dynamic scheduling" recommendation, and
+> the bitwise-reproducibility requirement. §2's implementation has **not** been written.
+
+## 1. The `UniqueFusion` gate is unnecessary — DONE, dropped and tested
+
+> **DONE.** `FusionStyle(I) === UniqueFusion()` is gone from `uses_blocked_kernel`;
+> `SymmetricBraiding`, `A <: Array`, `I !== Trivial` and `numout(t) == 1` remain. The
+> analysis below was correct in every particular.
+>
+> `test_messages_blocked.jl` passes 7697/7697 with `Vect[SU2Irrep]` and
+> `hubbard_space(Trivial, SU2Irrep)` added to `_MSG_SPACES`, including the decisive
+> non-Hermitian testset, the dual-physical-space and padded-leg testsets, and the
+> `tensoralloc` fingerprint test that proves the blocked path is the one that ran. The
+> SU(2) fallback assertions were **inverted, not deleted**, and the selection table is
+> now keyed by name so reordering a row cannot silently realign expectations. A missing
+> guard for the one *real* restriction was added: `!uses_blocked_kernel` on a
+> `numout == 2` tensor.
+>
+> **How much this is worth, stated carefully.** The A/B ratios are the *best in the
+> table* — `fz2_su2` 2.415× (χ=64) / 1.896× (χ=128) and `su2` 1.542× / 1.408×, against
+> `fz2_u1`'s 1.232× at χ=128 and a `:trivial` control of 0.985-1.024
+> (`benchmark/reports/backend_ab.md`). The mechanism is clear: these have the smallest
+> mean subblocks in the suite (91-122 elements against `fz2_u1`'s 1365), which is the
+> regime the blocked formulation targets, and the *pairwise* arm pays the
+> `GenericTreeTransformer` tax too, so non-abelian does not hand it back.
+>
+> **But no production path in this repo reaches it yet.** `scripts/hubbard_quench`
+> *rejects* SU(2) outright — `sectortypes` throws, because `product_state` only handles
+> abelian sectors and an AFM/CDW product state breaks spin rotation regardless — and no
+> `examples/` fixture is non-abelian (they are all `fermion_space(Trivial)`, i.e. `fℤ₂`).
+> So this is a capability improvement plus a large *latent* win, not an active speedup of
+> anything currently run. Do not cite it as "speeds up production". The win becomes real
+> the moment a non-abelian initial state is reachable, which is a `product_state`
+> limitation and not a BP one.
+>
+> **Cost, and the trim it forced. MEASURED, three runs:** 11m39s baseline (HEAD's test
+> file against the new source) → **18m05s** with the two non-abelian rows on all six
+> geometries → **15m44s** with `K6` trimmed from them (6857/6857 passing). So +4m05s
+> (+35 %) net, and the trim recovers 37 % of the addition.
+>
+> **The added time does not extend the suite, and the trim is what keeps it that way.**
+> Full `Pkg.test()` is **11260/11260 in 26m30s** on 15 parallel workers, and the critical
+> path is `test_apply_gate_operator` at 1580 s — `test_messages_blocked` runs 1351 s
+> under that load, i.e. inside the slack. Untrimmed it would have been the critical path
+> instead.
+>
+> Essentially all of it is *compilation*: the warm sweep over all six geometries × three
+> graded symmetries runs in ~20 s (`fZ2xSU2`/`K6`, the worst single fixture, is 6.2 s of
+> BP plus 2.1 s of sweep). Compilation is driven by distinct `(sector type, numind)`
+> pairs, which is why geometry count is almost irrelevant and the only trim with leverage
+> is dropping the one geometry contributing an otherwise-unused arity — `K6`, the sole
+> degree-5 (`M = 6`) fixture. That is what `_msg_geometries` does. Dropping
+> `cycle`/`grid`/`K5` instead would have saved seconds, not minutes, since they share
+> `M = 5`/`M = 3` with fixtures that stay. Degree 5 is still swept for all four abelian
+> symmetries.
+>
+> Still **not** covered: `BraidingStyle` is the remaining gate and no anyonic fixture
+> tests that the fallback fires for it. And the §2 threading probe is abelian-only, so
+> no threading claim covers these new symmetries.
+
+### Original analysis (retained — it was right)
 
 `uses_blocked_kernel` (`src/backends.jl`) currently requires
 `FusionStyle(sectortype(S)) === UniqueFusion()`, so `SU2Irrep` and
@@ -54,7 +120,68 @@ arrays and one large BLAS call), and keep `numout(t) == 1` (§3).
 
 ---
 
-## 2. The threading design that phase 4a did **not** measure
+## 2. The threading design that phase 4a did **not** measure — MEASURED, GO above χ = 64
+
+> **MEASURED — see `subblock_probe.md`.** The design works: **4.4-5.5×** on the message
+> kernel at `fz2_u1` / honeycomb / χ = 128 / 8 threads (range over two independent runs —
+> quote the range), 1.25-1.42× at χ = 64, and a **0.48-0.66× regression at χ = 32** (so a
+> size guard is required). Correct to 1e-16 against the real kernel. All three of phase
+> 4a's objections fail to transfer, exactly as argued below — 337 units, intra-thread
+> sequencing, and an imbalance of 16.6× against a 42× per-thread share.
+>
+> **Scheduler: an atomic-counter pull loop over units, and no work model.** Measured
+> equal to a deterministic longest-processing-time-first assignment within the control
+> deviation at χ = 128 (one row each way), so the plan-time work estimate LPT would need —
+> whose copy-vs-flop weighting was never calibrated — should not be written.
+>
+> **The implementation brief lives at the end of `subblock_probe.md`** — decisions already
+> taken, the TensorKit-internals dependency and why the two internals-free alternatives do
+> not reach the win, and ten open items in the order they bite. Start there, not here.
+>
+> **Three things below are wrong.** They are left in place with corrections rather than
+> edited away, because each one would have misdirected the implementation:
+>
+> 1. **"the serial `t_block_loop / t_kernel` ceiling still bounds you … caps the kernel
+>    speedup around 2.3×" — WRONG for this design.** That ceiling assumes only the gemms
+>    thread and the `tensoradd!` transports stay serial, which is phase 4a's
+>    decomposition. Here the transports are per-subblock too (TensorKit's
+>    `AbelianTreeTransformer` is already a per-tree loop), so they thread with everything
+>    else and the serial fraction collapses to the `d` message transposes plus the
+>    reduction. Measured 5.46× against the predicted 2.3× cap. **Do not use this ceiling
+>    to scope the work.**
+> 2. **"dynamic scheduling can absorb the flop imbalance" — the imbalance needs
+>    absorbing, but not by *dynamic* scheduling specifically.** Deterministic
+>    longest-processing-time-first assignment hits the theoretical bound exactly at every
+>    fixture and thread count measured. What matters, and is *not* mentioned below, is
+>    that the obvious *contiguous* chunking is a strawman: heavy units cluster in
+>    enumeration order, capping it at 2.66× on 8 threads against a bound of 8.00×. LPT vs
+>    an atomic-counter pull loop is settled in `subblock_probe.md` — the pull loop needs
+>    no work model, so it wins unless it strands the heaviest unit.
+> 3. **The whole "reproducibility" row of the hazard table is MOOT — the user does not
+>    require bitwise equality (2026-08-03).** Note also that as *stated* it was
+>    impossible: partitioning a sum across `t` buffers regroups the additions, so no
+>    implementation can make a `t`-thread result bitwise equal to a 1-thread one short of
+>    one unit per thread. What determinism was buying, and is now being spent, is §6's
+>    "`run_one` is bitwise reproducible in-process" — with a nondeterministic reduction
+>    order the two `free_fermion` examples become irreproducible run to run, since §6
+>    records them amplifying 1e-16 to 1e-3 over ~80 Trotter steps. Fine while they are
+>    illustrative; a problem if one becomes a regression gate.
+>
+> **A hazard this section omits, which turned out to be benign at scale.** Splitting the
+> outer loop by subblock splits `mul!`'s merged per-coupled-sector gemms along their `m`
+> axis — 105 → 2359 calls per vertex call at χ = 128, identical flops. It costs *nothing*
+> there (the unit loop is 7 % faster than the real kernel serially, from better
+> locality) because those gemms are ≈0.13 flop/byte and memory-bound, not
+> compute-bound. It costs 1.72× at χ = 32, which is part of why that point regresses.
+>
+> **§4.1 was checked first, as §4 asks.** BLAS threads give **1.27×** at the production
+> point for zero code, and are a *pessimization* at χ = 64 (0.81-0.91×). Not a substitute
+> for this work, and the same magnitude as phase 4a's `TRANSFORMER_THREADS` finding.
+>
+> **Scope gap:** the probe is **abelian-only**. `SU2Irrep` and `fℤ₂ ⊠ SU2Irrep` now take
+> the blocked kernel (§1) and no threading claim covers them.
+
+### Original design argument (retained — it was right)
 
 `phase4a.md` measured **threading the coupled-sector loop inside one `mul!`** and
 returned no-go, for three reasons: the chain is sequential (`ket[k+1]` comes from
@@ -126,7 +253,12 @@ just not accelerated.
 
 ## 4. Other levers, ranked
 
-1. **BLAS threads — unexplored, and plausibly the largest.** Every measurement in this
+1. ~~**BLAS threads — unexplored, and plausibly the largest.**~~ **MEASURED — 1.27× at
+   the production point, and negative at χ = 64.** See `subblock_probe.md` §4.1. It is
+   free, so take it behind a size-and-symmetry guard, but it is not the largest: the §2
+   design is 5.46× at the same point. Original text follows.
+
+   **BLAS threads — unexplored, and plausibly the largest.** Every measurement in this
    project pinned `BLAS.set_num_threads(1)` for reproducibility. Direct timing puts the
    block loop at **57-74%** of the kernel at χ=128, so on a many-core box simply letting
    BLAS use cores is free parallelism nobody has tested. Check this *before* the §2 work
