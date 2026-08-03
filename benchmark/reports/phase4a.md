@@ -1,5 +1,14 @@
 # Phase 4a — threading feasibility and plan-cache feasibility
 
+>  **⚠ Scope of this no-go.** Part A measured exactly one decomposition: threading the
+>  coupled-sector loop *inside* one `mul!`. A different design — an outer loop over
+>  symmetry **subblocks**, each handed to the whole kernel, with per-thread output
+>  messages summed at the end — is **not** covered here, and none of Part A's three
+>  objections apply to it (concurrency becomes 73-337 units rather than 7-15; the
+>  sequential chain becomes intra-thread sequencing; the reduction replaces the
+>  impossible output partitioning). See `blocked_kernel_followups.md` §2 before
+>  concluding that threading was ruled out.
+
 **Verdict: no-go on both.** Threading the block loop fails all three pre-committed
 criteria at the production symmetry, and a perfect plan cache is worth ≤1.08× at
 χ ≥ 32 and nothing at χ ≥ 64.
