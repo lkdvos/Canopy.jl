@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Free fermions on a honeycomb lattice · Canopy.jl</title><meta name="title" content="Free fermions on a honeycomb lattice · Canopy.jl"/><meta property="og:title" content="Free fermions on a honeycomb lattice · Canopy.jl"/><meta property="twitter:title" content="Free fermions on a honeycomb lattice · Canopy.jl"/><meta name="description" content="Documentation for Canopy.jl."/><meta property="og:description" content="Documentation for Canopy.jl."/><meta property="twitter:description" content="Documentation for Canopy.jl."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">Canopy.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../../design/">Design</a></li><li><a class="tocitem" href="../../states/">Constructing states</a></li><li><a class="tocitem" href="../../operators/">Operators and density matrices</a></li><li><a class="tocitem" href="../../fermions/">Fermions</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../">Examples</a></li><li class="is-active"><a class="tocitem" href>Free fermions on a honeycomb lattice</a><ul class="internal"><li><a class="tocitem" href="#Exact-single-particle-reference"><span>Exact single-particle reference</span></a></li><li><a class="tocitem" href="#Honeycomb-PBC-graph"><span>Honeycomb PBC graph</span></a></li><li><a class="tocitem" href="#Random-PBC-honeycomb-state"><span>Random PBC honeycomb state</span></a></li><li><a class="tocitem" href="#Free-fermion-bond-operators"><span>Free-fermion bond operators</span></a></li><li><a class="tocitem" href="#Running-a-single-(n,-n,-μ,-Dmax)-point"><span>Running a single (n₁, n₂, μ, Dmax) point</span></a></li><li><a class="tocitem" href="#Scan-and-plot"><span>Scan and plot</span></a></li></ul></li><li><a class="tocitem" href="../free_fermion_ring/">Free fermions on a ring</a></li><li><a class="tocitem" href="../free_fermion_thermal/">Free fermions at finite temperature</a></li><li><a class="tocitem" href="../qasm_circuit/">Running OpenQASM circuits</a></li><li><a class="tocitem" href="../realtime/">Real-time evolution of free fermions</a></li><li><a class="tocitem" href="../tfim_chain_ring/">Transverse-field Ising model on a ring</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Free fermions on a honeycomb lattice</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Free fermions on a honeycomb lattice</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/lkdvos/Canopy.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/lkdvos/Canopy.jl/blob/main/examples/free_fermion_honeycomb/main.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Free-fermions-on-a-honeycomb-lattice"><a class="docs-heading-anchor" href="#Free-fermions-on-a-honeycomb-lattice">Free fermions on a honeycomb lattice</a><a id="Free-fermions-on-a-honeycomb-lattice-1"></a><a class="docs-heading-anchor-permalink" href="#Free-fermions-on-a-honeycomb-lattice" title="Permalink"></a></h1><p>Imaginary-time evolution of spinless free fermions on a finite honeycomb lattice,</p><p class="math-container">\[H = -t \sum_{\langle ij \rangle} \left( c^\dagger_i c_j + c^\dagger_j c_i \right) - \mu \sum_i n_i,\]</p><p>on an <span>$n_1 \times n_2$</span> unit-cell PBC honeycomb torus (2 sites per cell, <span>$N = 2 n_1 n_2$</span>), via simple update on top of belief-propagation messages. We sweep <span>$\mu$</span> at fixed <span>$t$</span>, compute the ground-state energy per site <span>$E/N$</span> and the filling <span>$\langle n \rangle$</span>, and compare against the exact single-particle solution at the same finite <span>$(n_1, n_2)$</span>.</p><p>The honeycomb lattice has coordination 3 and girth 6, versus 4 and 4 for the square lattice — BP messages travel further before encountering a loop, so this is a regime where simple update on top of BP is naturally accurate. The bipartite spectrum is <span>$\varepsilon_\pm(k) = \pm |f(k)| - \mu$</span> with</p><p class="math-container">\[f(k) = -t \left( 1 + e^{i k \cdot a_1} + e^{i k \cdot a_2} \right), \qquad k \cdot a_j = 2\pi m_j / n_j.\]</p><p>This example can be run from the command line with:</p><pre><code class="nohighlight hljs">julia --project=examples examples/free_fermion_honeycomb/main.jl</code></pre><pre><code class="language-julia hljs">using Canopy: randn_state, BPMessages, belief_propagation,
+    UndirectedEdge, LocalGate, apply!, reduced_density_matrix, expect,
+    Strang, trotterize, edge_coloring
+using TensorKit
+using TensorKitTensors.FermionOperators: f_num, f_hopping, fermion_space
+using MatrixAlgebraKit: truncrank, trunctol
+using Graphs: SimpleGraph, add_edge!, edges, src, dst
+using Random
+using Statistics: mean
+using Printf
+using CairoMakie</code></pre><h2 id="Exact-single-particle-reference"><a class="docs-heading-anchor" href="#Exact-single-particle-reference">Exact single-particle reference</a><a id="Exact-single-particle-reference-1"></a><a class="docs-heading-anchor-permalink" href="#Exact-single-particle-reference" title="Permalink"></a></h2><p>Spinless tight-binding on a honeycomb <span>$n_1 \times n_2$</span> PBC torus has finite-torus momenta satisfying <span>$k \cdot a_j = 2\pi m_j / n_j$</span>, and each <span>$k$</span> contributes two bands <span>$\varepsilon_\pm(k) = \pm |f(k)| - \mu$</span>. The ground state fills every mode with <span>$\varepsilon &lt; 0$</span>; modes at <span>$\varepsilon = 0$</span> are left unfilled (a consistent convention at the band edge — relevant on sizes where <span>$n_1$</span> and <span>$n_2$</span> are both multiples of 3 and the Dirac points are sampled exactly).</p><pre><code class="language-julia hljs">function exact_per_site(n1::Int, n2::Int, μ::Real; t::Real=1.0)
+    εs = Float64[]
+    for m1 in 0:n1-1, m2 in 0:n2-1
+        f = -t * (1 + cis(2π * m1 / n1) + cis(2π * m2 / n2))
+        a = abs(f)
+        push!(εs, -a - μ)
+        push!(εs, a - μ)
+    end
+    filled = εs[εs.&lt;0]
+    N = 2 * n1 * n2
+    return sum(filled) / N, length(filled) / N
+end</code></pre><pre><code class="nohighlight hljs">exact_per_site (generic function with 1 method)</code></pre><h2 id="Honeycomb-PBC-graph"><a class="docs-heading-anchor" href="#Honeycomb-PBC-graph">Honeycomb PBC graph</a><a id="Honeycomb-PBC-graph-1"></a><a class="docs-heading-anchor-permalink" href="#Honeycomb-PBC-graph" title="Permalink"></a></h2><p>With <span>$n_1 \times n_2$</span> unit cells, each carrying two sites (<span>$A = 1$</span>, <span>$B = 2$</span>), the linear vertex index is</p><p class="math-container">\[\mathrm{idx}(i, j, s) = \bigl( (i-1)\, n_2 + (j-1) \bigr) \cdot 2 + s, \qquad i \in 1{:}n_1,\ j \in 1{:}n_2.\]</p><p>Each <span>$A$</span> at <span>$(i,j)$</span> connects to the <span>$B$</span> sites at <span>$(i,j)$</span>, <span>$(i+1,j)$</span>, and <span>$(i,j+1)$</span> (PBC).</p><pre><code class="language-julia hljs">function honeycomb_graph(n1::Int, n2::Int)
+    idx(i, j, s) = ((mod1(i, n1) - 1) * n2 + (mod1(j, n2) - 1)) * 2 + s
+    g = SimpleGraph(2 * n1 * n2)
+    for i in 1:n1, j in 1:n2
+        a = idx(i, j, 1)
+        add_edge!(g, a, idx(i, j, 2))
+        add_edge!(g, a, idx(i + 1, j, 2))
+        add_edge!(g, a, idx(i, j + 1, 2))
+    end
+    return g
+end</code></pre><pre><code class="nohighlight hljs">honeycomb_graph (generic function with 1 method)</code></pre><h2 id="Random-PBC-honeycomb-state"><a class="docs-heading-anchor" href="#Random-PBC-honeycomb-state">Random PBC honeycomb state</a><a id="Random-PBC-honeycomb-state-1"></a><a class="docs-heading-anchor-permalink" href="#Random-PBC-honeycomb-state" title="Permalink"></a></h2><pre><code class="language-julia hljs">function honeycomb_state(n1::Int, n2::Int, Dmax::Int; T::Type=ComplexF64)
+    g = honeycomb_graph(n1, n2)
+    P = fermion_space(Trivial)
+    V = Vect[fℤ₂](0 =&gt; cld(Dmax, 2), 1 =&gt; fld(Dmax, 2))
+    ekeys = [UndirectedEdge(src(e), dst(e)) for e in edges(g)]
+    return randn_state(T, g, P, V), ekeys
+end</code></pre><pre><code class="nohighlight hljs">honeycomb_state (generic function with 1 method)</code></pre><h2 id="Free-fermion-bond-operators"><a class="docs-heading-anchor" href="#Free-fermion-bond-operators">Free-fermion bond operators</a><a id="Free-fermion-bond-operators-1"></a><a class="docs-heading-anchor-permalink" href="#Free-fermion-bond-operators" title="Permalink"></a></h2><p>We distribute the bond Hamiltonian across edges as</p><p class="math-container">\[h_e = -t\, \mathrm{hop}_e - \frac{\mu}{\deg(u)}\, n \otimes I - \frac{\mu}{\deg(v)}\, I \otimes n,\]</p><p>so that <span>$\sum_e h_e = H$</span> exactly. On the honeycomb torus every vertex has degree 3.</p><pre><code class="language-julia hljs">function fermion_bond_hamiltonian(t::Real, μ::Real, deg_u::Int, deg_v::Int; T::Type=ComplexF64)
+    hop = f_hopping(T, Trivial)
+    n = f_num(T, Trivial)
+    I1 = id(fermion_space(Trivial))
+    return -t * hop - (μ / deg_u) * (n ⊗ I1) - (μ / deg_v) * (I1 ⊗ n)
+end</code></pre><pre><code class="nohighlight hljs">fermion_bond_hamiltonian (generic function with 1 method)</code></pre><h2 id="Running-a-single-(n,-n,-μ,-Dmax)-point"><a class="docs-heading-anchor" href="#Running-a-single-(n,-n,-μ,-Dmax)-point">Running a single (n₁, n₂, μ, Dmax) point</a><a id="Running-a-single-(n,-n,-μ,-Dmax)-point-1"></a><a class="docs-heading-anchor-permalink" href="#Running-a-single-(n,-n,-μ,-Dmax)-point" title="Permalink"></a></h2><p>Each point is evolved with a Strang-split Trotter circuit over a decreasing-<code>dτ</code> schedule, re-converging the BP messages after every sweep.</p><pre><code class="language-julia hljs">const SCHEDULE = ((0.1, 60), (0.01, 60), (0.001, 60))
+
+function run_one(n1::Int, n2::Int, μ::Real, Dmax::Int;
+    t::Real=1.0, seed::UInt=hash((n1, n2, μ, Dmax)))
+    Random.seed!(seed)
+    T = ComplexF64
+    state, ekeys = honeycomb_state(n1, n2, Dmax; T)
+    msgs = BPMessages(state)
+    msgs = belief_propagation(msgs, state; maxiter=300, tol=1e-6)
+
+    h_e = fermion_bond_hamiltonian(t, μ, 3, 3; T)
+    bond_hams = Dict(e =&gt; h_e for e in ekeys)
+    alg = Strang(edge_coloring(keys(bond_hams)))
+    circuits = Dict(dτ =&gt; trotterize(bond_hams, dτ, alg) for (dτ, _) in SCHEDULE)
+    trunc = truncrank(Dmax)
+
+    for (dτ, nsteps) in SCHEDULE
+        circuit = circuits[dτ]
+        for _ in 1:nsteps
+            apply!(state, msgs, circuit; trunc)
+            msgs = belief_propagation(msgs, state; maxiter=200, tol=1e-6)
+        end
+    end
+
+    N = 2 * n1 * n2
+    E = sum(real(expect(state, msgs, h_e, e)) for e in ekeys)
+    n_op = f_num(T, Trivial)
+    nbar = mean(real(expect(state, msgs, n_op, v)) for v in 1:N)
+    return E / N, nbar
+end</code></pre><pre><code class="nohighlight hljs">run_one (generic function with 1 method)</code></pre><h2 id="Scan-and-plot"><a class="docs-heading-anchor" href="#Scan-and-plot">Scan and plot</a><a id="Scan-and-plot-1"></a><a class="docs-heading-anchor-permalink" href="#Scan-and-plot" title="Permalink"></a></h2><p>Sweep <span>$\mu$</span> at two bond dimensions and overlay the simple-update points on a finely sampled exact reference curve (the fine grid keeps the finite-size steps rendering correctly).</p><pre><code class="language-julia hljs">function main(; n1::Int=2, n2::Int=2, Dmaxs=(4, 8), μs=range(-3.5, 3.5; length=11), t::Real=1.0)
+    E_su = [similar(collect(μs), Float64) for _ in Dmaxs]
+    n_su = [similar(collect(μs), Float64) for _ in Dmaxs]
+
+    # Exact reference on a fine grid so finite-size steps render correctly.
+    μs_fine = range(first(μs), last(μs); length=801)
+    E_ex_fine = similar(collect(μs_fine), Float64)
+    n_ex_fine = similar(collect(μs_fine), Float64)
+    for (i, μ) in enumerate(μs_fine)
+        E_ex_fine[i], n_ex_fine[i] = exact_per_site(n1, n2, μ; t)
+    end
+
+    println(&quot;Free fermion PBC honeycomb  n₁×n₂=$n1×$n2  (N=$(2*n1*n2) sites)  Dmaxs=$Dmaxs  t=$t&quot;)
+    cols = [&quot;μ&quot;, &quot;E/N (exact)&quot;, &quot;⟨n⟩ (exact)&quot;]
+    for D in Dmaxs
+        push!(cols, &quot;E/N (D=$D)&quot;)
+        push!(cols, &quot;⟨n⟩ (D=$D)&quot;)
+    end
+    println(&quot;  &quot; * join((rpad(c, 13) for c in cols), &quot;  &quot;))
+    for (i, μ) in enumerate(μs)
+        E_ex, n_ex = exact_per_site(n1, n2, μ; t)
+        @printf &quot;  %-13.3f  %-13.8f  %-13.8f&quot; μ E_ex n_ex
+        for (k, Dmax) in enumerate(Dmaxs)
+            E_su[k][i], n_su[k][i] = run_one(n1, n2, μ, Dmax; t)
+            @printf &quot;  %-13.8f  %-13.8f&quot; E_su[k][i] n_su[k][i]
+        end
+        println()
+        flush(stdout)
+    end
+
+    colors = [:red, :royalblue, :darkgreen, :orange]
+    markers = [:circle, :diamond, :utriangle, :rect]
+
+    fig = Figure(size=(720, 720))
+    ax1 = Axis(fig[1, 1]; xlabel=&quot;μ / t&quot;, ylabel=&quot;E / N&quot;,
+        title=&quot;Free fermion PBC honeycomb, $n1×$n2 cells&quot;)
+    lines!(ax1, collect(μs_fine), E_ex_fine; label=&quot;Exact (single-particle)&quot;, color=:black)
+    for (k, Dmax) in enumerate(Dmaxs)
+        scatter!(ax1, collect(μs), E_su[k];
+            label=&quot;Simple update + BP, D=$Dmax&quot;,
+            color=colors[mod1(k, length(colors))],
+            marker=markers[mod1(k, length(markers))])
+    end
+    axislegend(ax1; position=:lt)
+
+    ax2 = Axis(fig[2, 1]; xlabel=&quot;μ / t&quot;, ylabel=&quot;⟨n⟩&quot;)
+    lines!(ax2, collect(μs_fine), n_ex_fine; label=&quot;Exact (single-particle)&quot;, color=:black)
+    for (k, Dmax) in enumerate(Dmaxs)
+        scatter!(ax2, collect(μs), n_su[k];
+            label=&quot;Simple update + BP, D=$Dmax&quot;,
+            color=colors[mod1(k, length(colors))],
+            marker=markers[mod1(k, length(markers))])
+    end
+    axislegend(ax2; position=:lt)
+
+    outdir = joinpath(@__DIR__, &quot;figs&quot;)
+    mkpath(outdir)
+    outfile = joinpath(outdir, &quot;free_fermion_honeycomb.svg&quot;)
+    save(outfile, fig)
+    println(&quot;wrote $outfile&quot;)
+    return fig
+end
+
+main()</code></pre><pre><code class="nohighlight hljs">Free fermion PBC honeycomb  n₁×n₂=2×2  (N=8 sites)  Dmaxs=(4, 8)  t=1.0
+  μ              E/N (exact)    ⟨n⟩ (exact)    E/N (D=4)      ⟨n⟩ (D=4)      E/N (D=8)      ⟨n⟩ (D=8)    
+  -3.500         0.00000000     0.00000000     0.00000000     0.00000000     0.00000000     0.00000000   
+  -2.800         -0.02500000    0.12500000     0.00000064     0.00000078     0.00000001     0.00000001   
+  -2.100         -0.11250000    0.12500000     0.00063195     0.01092201     0.00002968     0.00006355   
+  -1.400         -0.20000000    0.12500000     -0.17577391    0.25730969     -0.11210884    0.20140730   
+  -0.700         -0.40000000    0.50000000     -0.41337278    0.39808565     -0.41153743    0.38353124   
+  0.000          -0.75000000    0.50000000     -0.71129047    0.50053730     -0.73870814    0.49302573   
+  0.700          -1.10000000    0.50000000     -1.11532635    0.61423166     -1.11806758    0.62178248   
+  1.400          -1.60000000    0.87500000     -1.57964947    0.74173299     -1.57895909    0.75923801   
+  2.100          -2.21250000    0.87500000     -2.09962149    0.99074771     -2.09995584    0.99989661   
+  2.800          -2.82500000    0.87500000     -2.79999734    0.99999596     -2.79999999    0.99999999   
+  3.500          -3.50000000    1.00000000     -3.50000000    1.00000000     -3.50000000    1.00000000   
+wrote /mnt/home/ldevos/Projects/Canopy/main/docs/src/examples/free_fermion_honeycomb/figs/free_fermion_honeycomb.svg
+</code></pre><p><img src="figs/free_fermion_honeycomb.svg" alt="Free fermions on a honeycomb lattice"/></p><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Examples</a><a class="docs-footer-nextpage" href="../free_fermion_ring/">Free fermions on a ring »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Tuesday 15 September 2026 22:04">Tuesday 15 September 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
